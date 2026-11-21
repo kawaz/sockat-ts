@@ -40,31 +40,24 @@ interface ConnectCall {
 }
 
 /**
- * Whether /proc can be used (SPEC "用語"): <proc>/self/fd/<fd> has the
- * (st_dev, st_ino) of the directory the fd holds, for the socket's directory
- * (or / opened for the check when it could not be opened).
+ * Whether the connect takes the row with proc-direct (SPEC "用語": `/proc`
+ * を使える, for choosing the connect row): / opened for the check, and
+ * <proc>/self/fd/<fd> has its (st_dev, st_ino). Where the PID namespace and
+ * the /proc mounted disagree, or /proc is not there, it does not.
  */
-function procUsable(w: World, sdir: number | null): boolean {
+function procRow(w: World): boolean {
   if (w.cfg.os !== "linux" || w.cfg.proc === "") {
     return false;
   }
-  let fd = sdir;
-  let opened = false;
-  if (fd === null) {
-    const r = attempt(() => fs.openSync("/", oPath | fs.constants.O_DIRECTORY));
-    if (!r.ok) {
-      return false;
-    }
-    fd = r.value;
-    opened = true;
+  const r = attempt(() => fs.openSync("/", oPath | fs.constants.O_DIRECTORY));
+  if (!r.ok) {
+    return false;
   }
   try {
-    const id = fstatId(fd);
-    return id !== null && procAt(w.cfg.proc, fd, id) !== null;
+    const id = fstatId(r.value);
+    return id !== null && procAt(w.cfg.proc, r.value, id) !== null;
   } finally {
-    if (opened) {
-      closeQuietly(fd);
-    }
+    closeQuietly(r.value);
   }
 }
 
@@ -224,7 +217,7 @@ export function* connectSteps(
   }
   try {
     const c: ConnectCall = { w, path, dir, opts, site, sdir };
-    for (const route of connectOrder(w, procUsable(w, sdir))) {
+    for (const route of connectOrder(w, procRow(w))) {
       let spelling: string;
       let after: (o: Outcome) => void = nothingAfter;
       switch (route) {
@@ -233,7 +226,15 @@ export function* connectSteps(
             trace.skip(route, "socket directory not opened");
             continue;
           }
-          spelling = `${w.cfg.proc}/self/fd/${c.sdir}/${dir.name}`;
+          // The fd used is checked itself, apart from the row's check
+          // (SPEC-routes "proc-direct").
+          const sid = fstatId(c.sdir);
+          const at = sid === null ? null : procAt(w.cfg.proc, c.sdir, sid);
+          if (at === null) {
+            trace.skip(route, "/proc does not name the socket's directory");
+            continue;
+          }
+          spelling = `${at}/${dir.name}`;
           if (byteLength(spelling) > w.cfg.spellingLength) {
             trace.skip(route, "spelling too long");
             continue;

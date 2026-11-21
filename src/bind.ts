@@ -1,5 +1,6 @@
 import { type CallSite, NoBase, systemError, type Trace, Unusable } from "./errors.ts";
-import { lstat, sameId, statId } from "./fsx.ts";
+import fs from "node:fs";
+import { attempt, closeQuietly, fstatId, lstat, oPath, sameId, statId } from "./fsx.ts";
 import { randomLength } from "./names.ts";
 import { byteLength } from "./paths.ts";
 import { absTarget, classify, lookUpDir, noNative, type Outcome, type RouteName, routeFailure, type SocketDir, type StandardSpelling } from "./route.ts";
@@ -110,10 +111,22 @@ function procB(w: World, b: Base): string | null {
 
 /** The shortest procB can be (a one-digit fd), for the estimate before B is opened; null without /proc. */
 function procBShortest(w: World): string | null {
-  if (w.cfg.os !== "linux" || w.cfg.proc === "" || statId(procFD(w)) === null) {
+  if (w.cfg.os !== "linux" || w.cfg.proc === "") {
     return null;
   }
-  return `${procFD(w)}/0`;
+  // Checked as procB is, with a directory opened for it (B is not open
+  // yet): /proc/<pid>/fd/<fd> has its (st_dev, st_ino) (SPEC-routes "綴りの形").
+  const r = attempt(() => fs.openSync("/", oPath | fs.constants.O_DIRECTORY));
+  if (!r.ok) {
+    return null;
+  }
+  try {
+    const id = fstatId(r.value);
+    const seen = statId(`${procFD(w)}/${r.value}`);
+    return id !== null && seen !== null && sameId(id, seen) ? `${procFD(w)}/0` : null;
+  } finally {
+    closeQuietly(r.value);
+  }
 }
 
 /** The length of link-dir's spelling <bspell>/<D>/<E>/<name>. */
