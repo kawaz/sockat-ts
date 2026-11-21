@@ -9,6 +9,40 @@ sockat-ts は、`sun_path` の上限を超えるパスでも Unix domain socket 
 - [docs/decisions/](docs/decisions/INDEX.md) — TypeScript 版の設計 (公開 API の形、native 抜きで作る経路とロック、標準に渡す長さ)
 - ハブの [SPEC](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md)・[SPEC-routes](https://github.com/kawaz/sockat/blob/main/docs/SPEC-routes-ja.md)・[DR-0017](https://github.com/kawaz/sockat/blob/main/docs/decisions/DR-0017-resolve-through-persistent-base.md) — 置き場と経路の作り方の正本
 
+## 構成
+
+| パス | 中身 |
+|---|---|
+| `src/index.ts` | `@kawaz/sockat` の公開 API (`bind`・`connect`・`bindEx`・`connectEx`・`resolveForBind`・`resolveForConnect`・`sweep`・`sweepBase`) と型の再 export |
+| `src/bun.ts` | `@kawaz/sockat/bun` の公開 API (`listen`・`connect`・`listenEx`・`connectEx`)。`Bun.listen` / `Bun.connect` に綴りを渡す |
+| `src/netapi.ts` | node:net に綴りを渡す口 (`listenAt`・`connectAt`) と、world を引数に取る bind / connect の本体 (試験が world を差し替えて呼ぶ) |
+| `src/bunapi.ts` | `Bun.listen` / `Bun.connect` に綴りを渡す口と、world を引数に取る listen / connect の本体 |
+| `src/types.ts` | 公開の型 (`Options`・`Spelling`・`Bound`・`Connected`・`ForBind`・`ForConnect`・`SocketFile`) |
+| `src/errors.ts` | エラーの形 (Node の流儀の OS のエラー、`ERR_INVALID_ARG_VALUE`、一般のエラー、診断の `route`・`skipped`)、`Trace`、`Unusable`、errno の読み取り |
+| `src/config.ts` | 環境の読み方 (`Config`: OS、標準に渡す長さ、置き場の候補、`/proc`、bind が symlink を辿るか、乱数、ロックの手段) と `envConfig` |
+| `src/world.ts` | `World` (プロセスが持つ B)、B の作り方・確かめ方、D の作り方とロック、resolve の E、`defaultWorld` / `setDefaultWorld` (試験用) |
+| `src/route.ts` | 経路の前の検査 (`classify`: base の形・NUL・abstract・長さ)、ソケットのディレクトリを先に引く `lookUpDir`、経路の失敗のエラー |
+| `src/bind.ts` | bind の列 (`bindSteps`: link-dir・link-file、作らない経路の skipped) と B を通る綴り (procB と実パス、長さの見積もり、`Spelling`) |
+| `src/connect.ts` | connect の列 (`connectSteps`: proc-direct・relative・link-file、作らない経路の skipped) と相対パスの作り方 |
+| `src/drive.ts` | 列 (generator) を標準に渡して回す `driveAsync` / `driveSync` と、`bindEx` の覚え方 (`beforeBind`・`boundOf`) |
+| `src/resolve.ts` | `resolveForBind` / `resolveForConnect` の本体と `ForBind` の `socketFile` |
+| `src/socketfile.ts` | E の片付け (`Cleaner`) と `SocketFile` (`remove`・`cleanup`) |
+| `src/sweep.ts` | `sweep` / `sweepBase` の本体 (死んだ D を排他のロックで見分けて消す) |
+| `src/lock.ts` | D のロック (`O_SHLOCK` / `O_EXLOCK`、`flock(1)` に fd を継がせる形) |
+| `src/fsx.ts` | `(st_dev, st_ino)`、実パス、`socketAt`、`*at` の代わり (`/proc/self/fd/<fd>/<名前>` か確かめた実パス) |
+| `src/paths.ts` / `src/names.ts` | パスの算術、乱数の名前と `createAt` |
+| `conformance/cli.ts` | ハブの適合試験の CLI (`just conformance [node\|bun]`)。package に入らない |
+| `test/*.test.ts` | 試験 (`node:test` で書き、Node と Bun の両方で走る)。`helpers.ts` が試験専用の置き場と world を用意し、`child.ts` が cwd を変える試験を子プロセスで走らせる |
+
+## 試験
+
+- `just test` で Node と Bun の両方 (macOS)、`just test-linux` で docker の Linux (Node 22・24・26、Bun の Debian と alpine)。経路は OS で違うので、変えたら両方で回す
+- 試験は `node:test` と `node:assert/strict` で書く。Node は `node --test` が `.ts` の型を剥がして走らせ、Bun は `bun test` が同じ試験を走らせる
+- 経路は world の `Config` (`proc`・`bindFollows`・`lock`・置き場) を差し替えて強制する。公開 API の試験も `helpers.ts` が `setDefaultWorld` で試験専用の置き場 (`/tmp/stt-*`、1777) に向ける
+- 一時ディレクトリはランダム名で作り、プロセスの終わりに消す。名前の接頭辞は `stt-` で、`sockat` で始めない。長さを決めたいものは `/tmp` の下、他は `$TMPDIR` の下
+- cwd のようにプロセス全体に効く設定を変える試験は子プロセス (`test/child.ts`) で行う
+- 各試験の直前に「何を確かめ、なぜそうなるべきか」をコメントで書く
+
 ## 守ること
 
 - **振る舞いを変える時は、先にハブの SPEC を直す。** SPEC と食い違う・決まらない所は自分で決めずハブの統括に聞く
