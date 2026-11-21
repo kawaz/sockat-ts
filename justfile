@@ -43,14 +43,14 @@ test-bun *ARGS:
 # Linux の試験を docker で回す (Node 22・24・26 と Bun。glibc の Debian と、Bun は busybox の alpine も)
 #
 # ソースを $TMPDIR の下 (mktemp -d) に写し、そこだけを mount する (リポは mount しない)。
-# 試験が使う依存は valibot (test/ の子プロセスの入出力) だけなので、node_modules はそれだけを写す。
+# 試験が使う依存は valibot (子プロセスと適合試験の CLI の入出力) だけなので、node_modules はそれだけを写す。
 [doc("Linux の試験を docker で回す (Node 22・24・26、Bun の Debian と alpine)")]
 test-linux:
     #!/usr/bin/env bash
     set -euo pipefail
     work=$(mktemp -d "${TMPDIR:-/tmp}/stt-linux.XXXXXX")
     trap 'rm -rf "$work"' EXIT
-    cp -R src test package.json "$work"/
+    cp -R src test conformance package.json "$work"/
     mkdir -p "$work/node_modules"
     cp -R node_modules/valibot "$work/node_modules/"
     status=0
