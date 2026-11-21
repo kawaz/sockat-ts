@@ -428,19 +428,24 @@ describe("bind", () => {
     }
   });
 
-  // SPEC "失敗をやり直さない": a default bind that fails (EADDRINUSE) keeps
-  // the shared E an earlier call made (other binds go through it), and
-  // removes an E it made itself.
-  test("a failing default bind keeps the shared E and removes one it made", async () => {
+  // SPEC-routes "経路の失敗の扱い": a default bind that fails (EADDRINUSE)
+  // keeps its link-dir E, even one it made itself (a default bind running
+  // alongside may be going through it), and the next default bind into the
+  // directory goes through that same E. bindEx still removes the E it made.
+  test("a failing default bind keeps its shared E, which the next one uses", async () => {
     const w = world({ tmp: freshPlace() });
     const dir = deepDir(tempDir());
     fs.writeFileSync(`${dir}/busy.sock`, "");
-    await rejection(bindIn(w, `${dir}/busy.sock`));
-    assert.deepEqual(linksOf(w), []);
-    const a = await bindIn(w, `${dir}/a.sock`);
+    const e1 = await rejection(bindIn(w, `${dir}/busy.sock`));
+    assert.equal(e1["code"], "EADDRINUSE");
     const e = linksOf(w);
-    const err = await rejection(bindIn(w, `${dir}/busy.sock`));
-    assert.equal(err["code"], "EADDRINUSE");
+    assert.equal(e.length, 1);
+    const a = await bindIn(w, `${dir}/a.sock`);
+    assert.deepEqual(linksOf(w), e);
+    await rejection(bindIn(w, `${dir}/busy.sock`));
+    assert.deepEqual(linksOf(w), e);
+    const ex = await rejection(bindExIn(w, `${dir}/busy.sock`, {}));
+    assert.equal(ex["code"], "EADDRINUSE");
     assert.deepEqual(linksOf(w), e);
     await closeServer(a);
   });

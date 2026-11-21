@@ -160,6 +160,11 @@ export interface Linked {
    * the default bind's shared E made by an earlier call (kept).
    */
   readonly fresh: boolean;
+  /**
+   * The E is the default bind's shared one (link-dir): kept when the bind
+   * fails, even when this call made it (SPEC-routes "経路の失敗の扱い").
+   */
+  readonly shared: boolean;
   readonly sp: Spelling;
   readonly base: string;
 }
@@ -223,7 +228,7 @@ function throughB(
     d.shared.set(target, link.name);
   }
   const spelling = `${spell}/${d.name}/${link.name}${rest}`;
-  const ln: Linked = { spelling, link, fresh, sp: linkedSpelling(b, viaProc, removable), base: baseValue(b, viaProc) };
+  const ln: Linked = { spelling, link, fresh, shared: share, sp: linkedSpelling(b, viaProc, removable), base: baseValue(b, viaProc) };
   if (byteLength(spelling) > max) {
     // A name taken made the E's name longer than estimated.
     dropFresh(ln);
@@ -350,9 +355,13 @@ export function* bindSteps(
       trace.route = route;
       return { route, spelling: ln.sp, base: ln.base, link: ln.link, spelt: ln.spelling };
     }
-    // The E this call made goes (a shared one from an earlier call stays); a
-    // failure to remove it is not reported: the bind's error is the call's.
-    dropFresh(ln);
+    // The E this call made goes, a failure to remove it not reported (the
+    // bind's error is the call's). The default bind's shared E stays, even
+    // one this call made: another default bind running alongside may be
+    // going through it, and the next one will (no lock is needed for that).
+    if (!ln.shared) {
+      dropFresh(ln);
+    }
     // Where bind(2) is not known to follow a symlink, a failure with nothing
     // at the path is taken for one that did not follow it (SPEC-routes
     // "link-file"). Where it is known to follow, the failure is real
