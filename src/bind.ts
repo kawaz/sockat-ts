@@ -198,7 +198,11 @@ function throughB(
   if (b instanceof Unusable) {
     return b;
   }
-  const e = b.nextE.toString(36);
+  // The E the spelling will go through: the default bind's shared one when
+  // its D has it already (made again only if it is gone), the next counter
+  // otherwise.
+  const known = share && b.d !== null ? b.d.shared.get(target) : undefined;
+  const e = known ?? b.nextE.toString(36);
   let spell: string | null = null;
   let viaProc = false;
   if (useProc) {

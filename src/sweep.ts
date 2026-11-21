@@ -26,12 +26,18 @@ function throwAll(errors: Error[], message: string): void {
  */
 export function sweepIn(w: World): void {
   const errors: Error[] = [];
+  const seen = new Set<string>();
   for (const p of w.autoPlaces()) {
     const real = realDir(p.path);
     if (!real.ok || checkAncestors(real.value, false) !== null) {
       continue;
     }
     const b = joinUnder(real.value, bName(p.kind));
+    // Two places may be one directory ($TMPDIR set to /private/tmp on macOS).
+    if (seen.has(b)) {
+      continue;
+    }
+    seen.add(b);
     errors.push(...sweepB(w, b, b, false));
   }
   throwAll(errors, "sweep: some directories could not be removed");

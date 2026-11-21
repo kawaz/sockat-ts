@@ -24,7 +24,7 @@ export type { RouteDiagnostics, SystemError } from "./errors.ts";
 /**
  * Binds and listens at path, as `net.createServer().listen(path)` does,
  * and resolves once it is listening. A path the standard takes (at most
- * sun_path less one byte; 108 bytes for Node on Linux) goes to it as it is.
+ * sun_path less one byte: 107 on Linux, 103 on macOS) goes to it as it is.
  *
  * The listener's `address()` returns `path`. Closing it unlinks the spelling
  * the kernel keeps: for a long path through a symlink to the socket file

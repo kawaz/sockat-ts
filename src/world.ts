@@ -106,8 +106,41 @@ export function linkEntry(e: Link): string {
   return entry(dHeld(e.base, e.d), e.name);
 }
 
-/** Unlinks E; a missing E is no error (removed already). */
+/**
+ * Whether the names on the way to an entry of b (and of d) still are the
+ * directories held, where entries are named by real path (no /proc: the
+ * HeldDir's at is null). B and D are ours and others cannot write to them,
+ * so while their names are the ones held nobody else can put anything in
+ * their place; once one was removed (a cleaner, a hand), its name may be
+ * someone else's now, through which a path would reach elsewhere. Named
+ * through /proc/self/fd, the entry is in the directory held whatever its
+ * name, and this is true.
+ */
+export function stillHeld(b: Base, d: ProcD | null): boolean {
+  const at = d === null ? b.at : d.at;
+  if (at !== null) {
+    return true;
+  }
+  const bNow = lstatId(b.real);
+  if (bNow === null || !sameId(bNow, b.id)) {
+    return false;
+  }
+  if (d === null) {
+    return true;
+  }
+  const dNow = lstatId(joinUnder(b.real, d.name));
+  return dNow !== null && sameId(dNow, d.id);
+}
+
+/**
+ * Unlinks E; a missing E is no error (removed already), and neither is a B
+ * or D no longer there (E went with it; what is at its name now is not
+ * ours to unlink: SPEC-routes "D と E", DR-0002).
+ */
 export function removeLink(e: Link): Result<void> {
+  if (!stillHeld(e.base, e.d)) {
+    return { ok: true, value: undefined };
+  }
   const r = attempt(() => fs.unlinkSync(linkEntry(e)));
   return r.ok || r.code === "ENOENT" ? { ok: true, value: undefined } : r;
 }
@@ -161,9 +194,9 @@ export function checkAncestors(real: string, otherX: boolean): { code: string; p
   return null;
 }
 
-/** The form of Options.base (SPEC "エラー"): absolute and ending with a name. */
+/** The form of Options.base (SPEC "エラー"): absolute, ending with a name, no NUL. */
 export function givenShapeOk(b: string): boolean {
-  return isAbs(b) && splitPath(b) !== null;
+  return isAbs(b) && splitPath(b) !== null && !b.includes("\0");
 }
 
 /**
@@ -241,7 +274,8 @@ export class World {
         continue;
       }
       if (!fits(p.kind, joinUnder(real.value, bName(p.kind)))) {
-        return spellingTooLong;
+        // A place passed over as taken stays in the reason (SPEC "診断").
+        return taken.length === 0 ? spellingTooLong : new Unusable(`spelling too long (${taken.join(", ")} taken, fails the checks)`);
       }
       const made = this.makeBase(p, real.value, false);
       if (!made.ok) {

@@ -11,13 +11,14 @@ import { closeServer, deepDir, echo, roundTrip, tempDir } from "./helpers.ts";
 // what it promises holds.
 
 describe("README's recommended code", () => {
-  // Bind by an absolute path (path.resolve before the bind, so a later
-  // chdir cannot retarget it), and remove the file before closing the
-  // listener: the file is gone and nothing else is touched.
+  // Bind by an absolute path (the cwd put in front before the bind, so a
+  // later chdir cannot retarget it, and no ".." folded as a string), and
+  // remove the file before closing the listener: the file is gone and
+  // nothing else is touched.
   test("bind an absolute path and remove before closing", async () => {
     const dir = deepDir(tempDir());
     const relative = nodePath.relative(process.cwd(), `${dir}/s.sock`);
-    const b = await bindEx(nodePath.resolve(relative));
+    const b = await bindEx(relative.startsWith("/") ? relative : `${process.cwd()}/${relative}`);
     try {
       echo(b.socket);
       assert.equal(await roundTrip(await connect(`${dir}/s.sock`)), "x");
@@ -28,14 +29,13 @@ describe("README's recommended code", () => {
     assert.equal(fs.existsSync(`${dir}/s.sock`), false);
   });
 
-  // A spelling meant for a peer of another uid is checked: with
-  // usableCrossUid the spelling is Linked and usableCrossUid (the tests'
-  // place lets others search), so the check passes.
-  test("check that a spelling for another uid was met", () => {
+  // A spelling meant for a peer of another uid: with usableCrossUid a long
+  // path's spelling is Linked and usableCrossUid (the tests' place lets
+  // others search), as README says; where that cannot be had it is
+  // ENAMETOOLONG (places.test.ts).
+  test("ask for a spelling another uid can follow", () => {
     const f = resolveForBind(`${deepDir(tempDir())}/s.sock`, { usableCrossUid: true });
-    if (f.spelling.kind === "Linked" && !f.spelling.usableCrossUid) {
-      throw new Error("no spelling another uid can follow");
-    }
+    assert.ok(f.spelling.kind === "Linked" && f.spelling.usableCrossUid);
     f.cleanup();
   });
 

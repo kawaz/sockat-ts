@@ -165,7 +165,7 @@ describe("spellings", () => {
 
   // SPEC "sockaddr に入る長さ": a route's spelling is at most sun_path less
   // the NUL (107 on Linux, 103 on the others), not the standard length
-  // (which is 108 for Node on Linux). The routes are held to the world's
+  // (the two are equal now, DR-0003). The routes are held to the world's
   // spelling length: a short one leaves no spelling through B.
   test("routes' spellings are held to the sockaddr length, not the standard length", async () => {
     assert.equal(sockaddrLength("linux"), 107);

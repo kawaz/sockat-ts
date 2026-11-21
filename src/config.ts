@@ -6,8 +6,6 @@ import { randomName } from "./names.ts";
 /** The systems as SPEC groups them ("用語": Linux / Android, Apple's, ...). */
 export type Os = "linux" | "darwin" | "freebsd" | "netbsd" | "openbsd" | "illumos" | "other";
 
-/** The runtime whose standard the spellings go to. */
-export type Runtime = "node" | "bun";
 
 /** Whether bind(2) follows a symlink in the last component (SPEC "bind の順"). */
 export type Follows = "yes" | "no" | "unknown";
@@ -64,29 +62,18 @@ export function currentOs(): Os {
   }
 }
 
-export function currentRuntime(): Runtime {
-  return typeof process.versions["bun"] === "string" ? "bun" : "node";
-}
-
 /**
- * The standard length (DR-0003): on Linux what the runtime hands to the
- * kernel unchanged in a sockaddr it does not widen (Node 108, Bun 107),
- * elsewhere sun_path less the NUL (103 on Apple's and the BSDs, 107 on
- * illumos).
+ * The standard length (DR-0003): sun_path less the NUL (107 on Linux and
+ * illumos, 103 on Apple's and the BSDs), for Node and Bun alike. Node on
+ * Linux would take 108 (all of sun_path, no NUL), which is not handed to it
+ * (the standard length never exceeds the sockaddr length).
  *
  * Design rationale: a system SPEC does not name gets 103, the shortest
  * sun_path less the NUL among the systems measured: a path the standard
  * might cut short or widen is better taken by the routes.
  */
-export function standardLength(os: Os, runtime: Runtime): number {
-  switch (os) {
-    case "linux":
-      return runtime === "bun" ? 107 : 108;
-    case "illumos":
-      return 107;
-    default:
-      return 103;
-  }
+export function standardLength(os: Os): number {
+  return sockaddrLength(os);
 }
 
 /**
@@ -133,7 +120,7 @@ export function envConfig(): Config {
   const os = currentOs();
   return {
     os,
-    standardLength: standardLength(os, currentRuntime()),
+    standardLength: standardLength(os),
     spellingLength: sockaddrLength(os),
     tmp: "/tmp",
     getenv: (name) => process.env[name],

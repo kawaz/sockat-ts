@@ -5,7 +5,7 @@ import { createAt, randomLength } from "./names.ts";
 import { below, byteLength, isAbs, joinUnder, relativeTo, splitPath } from "./paths.ts";
 import { absTarget, classify, cwdId, lookUpDir, noNative, type Outcome, type RouteName, routeFailure, type SocketDir, type StandardSpelling } from "./route.ts";
 import type { Options } from "./types.ts";
-import { type Base, type World } from "./world.ts";
+import { type Base, stillHeld, type World } from "./world.ts";
 
 // The connect order of a long path (SPEC "connect の順", DR-0002): the routes
 // that need no writing and no thread first, then link-file, which writes an
@@ -286,9 +286,14 @@ export function* connectSteps(
           const name = made.value;
           spelling = joinUnder(b.real, name);
           // A failure to remove E is not reported: a connect that went
-          // through is not made a failure by it.
+          // through is not made a failure by it. Named by B's real path, E
+          // is unlinked only while that name is still the B held (the
+          // connect waited, and a B removed meanwhile may be someone else's
+          // name now).
           after = () => {
-            attempt(() => fs.unlinkSync(entry(b, name)));
+            if (stillHeld(b, null)) {
+              attempt(() => fs.unlinkSync(entry(b, name)));
+            }
           };
           break;
         }
