@@ -43,7 +43,7 @@ test-bun *ARGS:
 # Linux の試験を docker で回す (Node 22・24・26 と Bun。glibc の Debian と、Bun は busybox の alpine も)
 #
 # ソースを $TMPDIR の下 (mktemp -d) に写し、そこだけを mount する (リポは mount しない)。
-# 試験は依存の package を使わないので、写すのは src/ と test/ と package.json だけ。
+# 試験が使う依存は valibot (test/ の子プロセスの入出力) だけなので、node_modules はそれだけを写す。
 [doc("Linux の試験を docker で回す (Node 22・24・26、Bun の Debian と alpine)")]
 test-linux:
     #!/usr/bin/env bash
@@ -51,6 +51,8 @@ test-linux:
     work=$(mktemp -d "${TMPDIR:-/tmp}/stt-linux.XXXXXX")
     trap 'rm -rf "$work"' EXIT
     cp -R src test package.json "$work"/
+    mkdir -p "$work/node_modules"
+    cp -R node_modules/valibot "$work/node_modules/"
     status=0
     for image in node:22-slim node:24-slim node:26-slim; do
       echo "== $image"
