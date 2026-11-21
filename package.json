@@ -1,6 +1,6 @@
 {
   "name": "@kawaz/sockat",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Bind and connect Unix domain sockets at paths longer than sun_path (TypeScript)",
   "keywords": ["unix-socket", "sun_path", "ENAMETOOLONG", "uds"],
   "homepage": "https://github.com/kawaz/sockat-ts#readme",
