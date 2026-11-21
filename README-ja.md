@@ -53,6 +53,7 @@ native の部品が要る経路は作らず、使えない経路として `skipp
 - 既定の `bind` / `listen` の listener を閉じると綴りで unlink する。link-file の綴りでは symlink だけが消え、ソケットのファイルが残る
 - D のロックは macOS と BSD は `O_SHLOCK`、Linux は `flock(1)` (util-linux / busybox)。Linux で `flock(1)` が無いと、長いパスの bind と `resolveForBind` / `resolveForConnect` が `ENAMETOOLONG` になる (既定の connect は届く)。illumos 等はロックの手段が無く同じ
 - DGRAM と SEQPACKET は無い (Node と Bun の標準に無い)
+- Linux で `/proc` が見えない環境 (空の tmpfs を被せた等) では、Bun 自体が起動時に `abort()` で落ちる (Bun 1.4.4・1.4.5 で確認。sockat を使わない `bun -e 'console.log(1)'` も同じ)。Node はそのまま動き、connect は relative を使う
 - 長いパスの listener の `address()` (node:net) と `unix` (`Bun.listen`) は元のパスを返す。他の言語の相手と運用の道具には綴りが見える
 - 短いパスのエラーは標準のまま (Node の listen は無いディレクトリに `EACCES` を返す)。長いパスは SPEC の errno (`ENOENT`)
 

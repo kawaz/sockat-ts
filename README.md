@@ -53,6 +53,7 @@ A route that needs native code is not made: it is passed over as unusable and na
 - Closing the listener of the default `bind` / `listen` unlinks its spelling: for a link-file spelling only the symlink goes, and the socket file stays
 - D is locked by `O_SHLOCK` on macOS and the BSDs, and by `flock(1)` (util-linux / busybox) on Linux. On a Linux without `flock(1)`, the bind of a long path and `resolveForBind` / `resolveForConnect` are `ENAMETOOLONG` (the default connect still reaches it); so on illumos and others, which have no way to lock
 - No DGRAM and no SEQPACKET (the standard libraries of Node and Bun have none)
+- On a Linux where `/proc` is not visible (an empty tmpfs mounted over it, for example), Bun itself aborts at startup (seen with Bun 1.4.4 and 1.4.5; a plain `bun -e 'console.log(1)'` without sockat does the same). Node runs, and its connect uses relative
 - The listener of a long path returns the original path from `address()` (node:net) and `unix` (`Bun.listen`). Peers in other languages and operational tools see the spelling
 - The errors of a short path are the standard's (Node's listen says `EACCES` for a missing directory); a long path's are SPEC's errno (`ENOENT`)
 
