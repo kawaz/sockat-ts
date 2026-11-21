@@ -42,7 +42,8 @@ describe("sweep", () => {
     const withFile = randomName();
     fs.mkdirSync(`${b}/${withFile}`);
     fs.writeFileSync(`${b}/${withFile}/f`, "");
-    fs.symlinkSync("/nonexistent", `${b}/${randomName()}`);
+    const eInB = randomName();
+    fs.symlinkSync("/nonexistent", `${b}/${eInB}`);
     fs.mkdirSync(`${b}/not-a-d`);
     const held = await child({ op: "hold-resolve", path: `${deepDir(tempDir())}/s.sock` }, tempDir());
     const out = v.parse(HoldOut, held.out);
@@ -55,7 +56,8 @@ describe("sweep", () => {
     assert.ok(after.includes(out.d), "the live child's D stays");
     assert.ok(after.includes(withFile), "a D with a file in it stays");
     assert.ok(after.includes("not-a-d"));
-    assert.equal(after.length, listing(b).length);
+    assert.ok(after.includes(eInB), "a symlink right in B (a connect's E) stays");
+    assert.ok(fs.lstatSync(`${b}/${eInB}`).isSymbolicLink());
 
     await held.end();
     sweep();
@@ -78,5 +80,8 @@ describe("sweep", () => {
     assert.ok(thrown(() => sweepBase("rel/b")).error instanceof TypeError);
     fs.symlinkSync(base, `${root}/link`);
     assert.equal(thrown(() => sweepBase(`${root}/link`))["code"], "EPERM");
+    // A parent that is not a directory is ENOTDIR, as for Options.base.
+    fs.writeFileSync(`${root}/file`, "");
+    assert.equal(thrown(() => sweepBase(`${root}/file/b`))["code"], "ENOTDIR");
   });
 });

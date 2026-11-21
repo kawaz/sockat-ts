@@ -1,7 +1,7 @@
 import { linkDirSpelling, type Linked, linkFileSpelling, newBindCall } from "./bind.ts";
 import { asError, systemError, Trace, Unusable, withDiagnostics } from "./errors.ts";
 import { type FileId, realFile, sameId, socketAt } from "./fsx.ts";
-import { absTarget, classify, cwdId, type RouteName } from "./route.ts";
+import { absTarget, classify, cwdId, forNodeNet, type RouteName, type StandardSpelling } from "./route.ts";
 import { Cleaner, RecordedSocketFile } from "./socketfile.ts";
 import type { ForBind, ForConnect, Options, SocketFile, Spelling } from "./types.ts";
 import type { World } from "./world.ts";
@@ -36,15 +36,15 @@ function socketFileOf(path: string, spelt: string, spelling: Spelling, cwd: File
   return new RecordedSocketFile(sock.value, cleaner);
 }
 
-/** resolveForBind on w. */
-export function resolveForBindIn(w: World, path: string, opts: Options): ForBind {
+/** resolveForBind on w, for the standard spell spells for (node:net's, which also suits Bun's). */
+export function resolveForBindIn(w: World, path: string, opts: Options, spell: StandardSpelling = forNodeNet): ForBind {
   const trace = new Trace();
   try {
-    const kind = classify(w, path, opts);
-    if (kind !== "long") {
-      const relative = kind === "short" && !path.startsWith("/");
+    const kind = classify(w, path, opts, spell);
+    if (kind.kind !== "long") {
+      const relative = kind.kind === "short" && !path.startsWith("/");
       const spelling: Spelling = relative ? { kind: "CwdRelative" } : { kind: "Original" };
-      return forBind(path, path, spelling, "standard", null, trace, new Cleaner(null, path), relative ? cwdId() : null, kind === "abstract");
+      return forBind(path, kind.spelt, spelling, "standard", null, trace, new Cleaner(null, path), relative ? cwdId() : null, kind.kind === "abstract");
     }
     const c = newBindCall(w, path, opts, { syscall: "resolve", path });
     trace.skip("standard", "path too long");
@@ -89,12 +89,13 @@ function forBind(
 }
 
 /** resolveForConnect on w: link-file only, through the process's D (usableCrossUid is not looked at). */
-export function resolveForConnectIn(w: World, path: string, opts: Options): ForConnect {
+export function resolveForConnectIn(w: World, path: string, opts: Options, spell: StandardSpelling = forNodeNet): ForConnect {
   const trace = new Trace();
   const given: Options = opts.base === undefined ? {} : { base: opts.base };
   try {
-    if (classify(w, path, given) !== "long") {
-      return forConnect(path, "standard", trace, new Cleaner(null, path));
+    const kind = classify(w, path, given, spell);
+    if (kind.kind !== "long") {
+      return forConnect(kind.spelt, "standard", trace, new Cleaner(null, path));
     }
     const c = newBindCall(w, path, given, { syscall: "resolve", path });
     trace.skip("standard", "path too long");

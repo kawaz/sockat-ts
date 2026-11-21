@@ -1,5 +1,5 @@
 import { type CallSite, invalidArgument, systemError, errnoCode, Unusable } from "./errors.ts";
-import { attempt, type FileId, statId, realDir } from "./fsx.ts";
+import { attempt, type FileId, realDir, sameId, statId } from "./fsx.ts";
 import { byteLength, isAbs, splitPath } from "./paths.ts";
 import type { Options } from "./types.ts";
 import { givenShapeOk, type World } from "./world.ts";
@@ -31,18 +31,41 @@ export const noNative = "no native code in sockat-ts";
 export type Outcome = { readonly ok: true; readonly close: () => void } | { readonly ok: false; readonly error: Error };
 
 /**
- * The kind of path, after the checks every call makes first (SPEC "短いパス",
- * "エラー"): an Options.base of the wrong form, and a NUL other than the
- * leading one of a Linux abstract name, are argument errors whatever the
- * length; an abstract name and a path of at most the standard length go to
- * the standard as they are; a longer one takes the routes.
+ * How a standard is handed a path it takes: the path itself, or the same
+ * file spelt so that the standard reads it as a path (SPEC "短いパス").
  */
-export function classify(w: World, path: string, opts: Options): "abstract" | "short" | "long" {
+export type StandardSpelling = (path: string) => string;
+
+/** For a standard that reads every string as a path (Bun.listen / Bun.connect's `unix`). */
+export const asItIs: StandardSpelling = (path) => path;
+
+/**
+ * For node:net, which reads a string that Number() makes 0 or more ("123",
+ * "1e3", " ") as a TCP port: such a spelling without a '/' gets "./" in
+ * front, which names the same file relative to the cwd.
+ */
+export const forNodeNet: StandardSpelling = (path) => (!path.includes("/") && Number(path) >= 0 ? `./${path}` : path);
+
+/** The kind of path, and the spelling to hand the standard when it takes it. */
+export type Kind = { readonly kind: "abstract" | "short"; readonly spelt: string } | { readonly kind: "long" };
+
+/**
+ * The kind of path, after the checks every call makes first (SPEC "短いパス",
+ * "エラー"): an Options.base of the wrong form, an empty path, and a NUL
+ * other than the leading one of a Linux abstract name, are argument errors
+ * whatever the length; an abstract name, and a path whose spelling for the
+ * standard (spell) is at most the standard length, go to the standard; a
+ * longer one takes the routes.
+ */
+export function classify(w: World, path: string, opts: Options, spell: StandardSpelling): Kind {
   if (opts.base !== undefined && !givenShapeOk(opts.base)) {
     throw invalidArgument("options.base", opts.base, "must be an absolute path ending with a name");
   }
+  if (path === "") {
+    throw invalidArgument("path", path, "must not be empty");
+  }
   if (w.cfg.os === "linux" && path.startsWith("\0")) {
-    return "abstract";
+    return { kind: "abstract", spelt: path };
   }
   if (path.includes("\0")) {
     throw invalidArgument(
@@ -53,7 +76,8 @@ export function classify(w: World, path: string, opts: Options): "abstract" | "s
         : "must not contain a NUL byte",
     );
   }
-  return byteLength(path) <= w.cfg.standardLength ? "short" : "long";
+  const spelt = spell(path);
+  return byteLength(spelt) <= w.cfg.standardLength ? { kind: "short", spelt } : { kind: "long" };
 }
 
 /** The socket's directory of a long path, looked up before anything else. */
@@ -89,6 +113,12 @@ export function lookUpDir(w: World, path: string, opts: Options, cross: boolean,
   if (!real.ok) {
     throw systemError(real.code, site.syscall, site.path);
   }
+  // The real path must name the directory stat looked up: another one there
+  // now (renamed or replaced in between) would put E elsewhere.
+  const seen = statId(real.value);
+  if (seen === null || !sameId(seen, { dev: st.value.dev, ino: st.value.ino })) {
+    throw new Error(`${site.syscall} ${site.path}: the socket's directory changed while it was looked up`);
+  }
   if (opts.base !== undefined) {
     w.checkGiven(opts.base, cross, site);
   }
@@ -100,10 +130,15 @@ export function lookUpDir(w: World, path: string, opts: Options, cross: boolean,
  * standard's errno, with the caller's path in place of the spelling (which
  * never shows in an error).
  */
-export function routeFailure(error: Error, site: CallSite): Error {
+export function routeFailure(error: Error, site: CallSite, spelling: string): Error {
   const code = errnoCode(error);
   if (code === undefined) {
-    return new Error(`${site.syscall} failed for ${site.path}: the standard gave an error without an errno`);
+    // Not the system's answer (a misuse the standard refused, such as Bun's
+    // TypeError for missing socket handlers): passed on as it is, unless it
+    // would show the spelling.
+    return error.message.includes(spelling)
+      ? new Error(`${site.syscall} failed for ${site.path}: the standard gave an error without an errno`)
+      : error;
   }
   return systemError(code, site.syscall, site.path);
 }

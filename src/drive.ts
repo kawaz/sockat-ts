@@ -17,6 +17,16 @@ function toOutcome<S>(a: Attempted<S>): Outcome {
   return a.ok ? { ok: true, close: a.close } : { ok: false, error: a.error };
 }
 
+/**
+ * The standard's answer as an outcome, a throw included (a standard may
+ * throw at once rather than fail later: Bun.connect without socket
+ * handlers), so the steps always go on and clean up what they made (E, the
+ * socket's directory's fd).
+ */
+function thrownAsFailure<S>(e: unknown): Attempted<S> {
+  return { ok: false, error: asError(e) };
+}
+
 /** Runs steps, handing each spelling to the async standard at. */
 export async function driveAsync<R, S>(
   steps: Generator<string, R, Outcome>,
@@ -25,7 +35,12 @@ export async function driveAsync<R, S>(
   let held: { socket: S } | null = null;
   let step = steps.next();
   while (step.done !== true) {
-    const a = await at(step.value);
+    let a: Attempted<S>;
+    try {
+      a = await at(step.value);
+    } catch (e) {
+      a = thrownAsFailure(e);
+    }
     held = a.ok ? { socket: a.socket } : null;
     step = steps.next(toOutcome(a));
   }
@@ -40,7 +55,12 @@ export function driveSync<R, S>(steps: Generator<string, R, Outcome>, at: (spell
   let held: { socket: S } | null = null;
   let step = steps.next();
   while (step.done !== true) {
-    const a = at(step.value);
+    let a: Attempted<S>;
+    try {
+      a = at(step.value);
+    } catch (e) {
+      a = thrownAsFailure(e);
+    }
     held = a.ok ? { socket: a.socket } : null;
     step = steps.next(toOutcome(a));
   }
@@ -74,9 +94,12 @@ export function beforeBind(path: string): BeforeBind {
 /**
  * The Bound of bindEx, the socket file recorded the moment the bind is done
  * (SPEC "remove"): followed to the socket it leads to, the cwd unchanged for
- * a relative path. When it cannot be recorded, the listener is discarded,
- * the E cleaned up, and a general error thrown (a remove that could not tell
- * the file must not look like a success).
+ * a relative path. When it cannot be recorded, a general error is thrown (a
+ * remove that could not tell the file must not look like a success), after
+ * the E is cleaned up and then the listener discarded: the standard unlinks
+ * the spelling on close, which with E gone names nothing, so whatever has
+ * replaced the socket file stays. A spelling with no E (a path the standard
+ * took as it is) is unlinked by the close all the same.
  */
 export function boundOf<S>(
   path: string,
@@ -102,16 +125,21 @@ export function boundOf<S>(
       ok = now !== null && before.cwd !== null && sameId(now, before.cwd);
     }
     if (!ok) {
-      discard();
+      let eGone = result.link === null;
       try {
         cleaner.cleanup();
+        eGone = true;
       } catch {
         // The error of the call is that the file could not be recorded.
       }
-      throw withDiagnostics(
-        new Error(`listen ${path}: the socket file bound could not be recorded for its removal; the listener was closed and the file left`),
-        trace,
-      );
+      discard();
+      const left =
+        result.link === null
+          ? "the listener was closed, which unlinks the path"
+          : eGone
+            ? "the listener was closed and what is at the path left"
+            : "the listener was closed, which unlinks the spelling (its symlink could not be removed first)";
+      throw withDiagnostics(new Error(`listen ${path}: the socket file bound could not be recorded for its removal; ${left}`), trace);
     }
   }
   return {

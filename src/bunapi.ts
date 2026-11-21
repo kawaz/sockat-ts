@@ -3,6 +3,7 @@ import { bindSteps } from "./bind.ts";
 import { connectSteps } from "./connect.ts";
 import { type Attempted, beforeBind, boundOf, diagnosed, driveAsync, driveSync } from "./drive.ts";
 import { asError, Trace } from "./errors.ts";
+import { asItIs } from "./route.ts";
 import type { Bound, Connected, Options } from "./types.ts";
 import type { World } from "./world.ts";
 
@@ -32,7 +33,9 @@ function connectAt<Data>(options: Bun.UnixSocketOptions<Data>): (spelling: strin
 
 /**
  * The listener's `unix` is the caller's path, not the spelling the kernel
- * keeps (DR-0002), when they differ. Bun's stop() still unlinks the spelling.
+ * keeps (DR-0002), when they differ. Bun's own listener keeps returning the
+ * path it was given after stop(), and so does this one. Bun's stop() still
+ * unlinks the spelling.
  */
 function showPath<Data>(listener: Bun.UnixSocketListener<Data>, path: string, spelt: string): void {
   if (spelt !== path) {
@@ -40,8 +43,18 @@ function showPath<Data>(listener: Bun.UnixSocketListener<Data>, path: string, sp
   }
 }
 
+/**
+ * Throws at once where `@kawaz/sockat/bun` is used without Bun, before
+ * anything is made in the places.
+ */
+export function requireBun(): void {
+  if (typeof Bun === "undefined") {
+    throw new Error("@kawaz/sockat/bun needs Bun (Bun.listen / Bun.connect); with Node, use @kawaz/sockat");
+  }
+}
+
 export function listenIn<Data>(w: World, options: Bun.UnixSocketOptions<Data>): Bun.UnixSocketListener<Data> {
-  const { result, socket } = driveSync(bindSteps(w, options.unix, {}, new Trace(), "listen"), listenAt(options));
+  const { result, socket } = driveSync(bindSteps(w, options.unix, {}, new Trace(), "listen", asItIs), listenAt(options));
   showPath(socket, options.unix, result.spelt);
   return socket;
 }
@@ -51,7 +64,7 @@ export function listenExIn<Data>(w: World, options: Bun.UnixSocketOptions<Data>,
   const path = options.unix;
   try {
     const before = beforeBind(path);
-    const { result, socket } = driveSync(bindSteps(w, path, sockatOptions, trace, "listen"), listenAt(options));
+    const { result, socket } = driveSync(bindSteps(w, path, sockatOptions, trace, "listen", asItIs), listenAt(options));
     showPath(socket, path, result.spelt);
     return boundOf(path, before, result, socket, () => socket.stop(true), trace);
   } catch (e) {
@@ -60,7 +73,7 @@ export function listenExIn<Data>(w: World, options: Bun.UnixSocketOptions<Data>,
 }
 
 export async function connectIn<Data>(w: World, options: Bun.UnixSocketOptions<Data>): Promise<Bun.Socket<Data>> {
-  const { socket } = await driveAsync(connectSteps(w, options.unix, {}, new Trace(), "connect"), connectAt(options));
+  const { socket } = await driveAsync(connectSteps(w, options.unix, {}, new Trace(), "connect", asItIs), connectAt(options));
   return socket;
 }
 
@@ -71,7 +84,7 @@ export async function connectExIn<Data>(
 ): Promise<Connected<Bun.Socket<Data>>> {
   const trace = new Trace();
   try {
-    const { result, socket } = await driveAsync(connectSteps(w, options.unix, sockatOptions, trace, "connect"), connectAt(options));
+    const { result, socket } = await driveAsync(connectSteps(w, options.unix, sockatOptions, trace, "connect", asItIs), connectAt(options));
     return { socket, route: result.route, skipped: [...trace.skipped] };
   } catch (e) {
     throw diagnosed(e, trace);

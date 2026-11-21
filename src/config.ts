@@ -26,6 +26,12 @@ export interface Config {
    * longest spelling a route may hand to it.
    */
   readonly standardLength: number;
+  /**
+   * The longest spelling a route hands to the kernel: sun_path less the NUL
+   * (SPEC "sockaddr に入る長さ": 107 on Linux and illumos, 103 elsewhere),
+   * whatever the standard would take.
+   */
+  readonly spellingLength: number;
   /** The first place for B (SPEC-routes "実体の置き場"): /tmp. */
   readonly tmp: string;
   /** Reads $XDG_RUNTIME_DIR and $TMPDIR at each call. */
@@ -83,6 +89,14 @@ export function standardLength(os: Os, runtime: Runtime): number {
   }
 }
 
+/**
+ * sun_path less the NUL (SPEC "sockaddr に入る長さ"). A system SPEC does not
+ * name gets 103, as for the standard length.
+ */
+export function sockaddrLength(os: Os): number {
+  return os === "linux" || os === "illumos" ? 107 : 103;
+}
+
 /** The systems' table of whether bind(2) follows a symlink (SPEC "bind の順"). */
 export function bindFollowsOn(os: Os): Follows {
   switch (os) {
@@ -120,6 +134,7 @@ export function envConfig(): Config {
   return {
     os,
     standardLength: standardLength(os, currentRuntime()),
+    spellingLength: sockaddrLength(os),
     tmp: "/tmp",
     getenv: (name) => process.env[name],
     proc: os === "linux" ? "/proc" : "",

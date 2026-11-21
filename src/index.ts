@@ -13,6 +13,7 @@
 import type net from "node:net";
 import { bindExIn, bindIn, connectExIn, connectIn } from "./netapi.ts";
 import { resolveForBindIn, resolveForConnectIn } from "./resolve.ts";
+import { forNodeNet } from "./route.ts";
 import { sweepBaseIn, sweepIn } from "./sweep.ts";
 import type { Bound, Connected, ForBind, ForConnect, Options } from "./types.ts";
 import { defaultWorld } from "./world.ts";
@@ -66,7 +67,7 @@ export function connectEx(path: string, options: Options = {}): Promise<Connecte
  * `spelling` says. Nothing is bound. ENAMETOOLONG where no spelling fits.
  */
 export function resolveForBind(path: string, options: Options = {}): ForBind {
-  return resolveForBindIn(defaultWorld(), path, options);
+  return resolveForBindIn(defaultWorld(), path, options, forNodeNet);
 }
 
 /**
@@ -75,7 +76,7 @@ export function resolveForBind(path: string, options: Options = {}): ForBind {
  * `usableCrossUid` is not looked at.
  */
 export function resolveForConnect(path: string, options: Options = {}): ForConnect {
-  return resolveForConnectIn(defaultWorld(), path, options);
+  return resolveForConnectIn(defaultWorld(), path, options, forNodeNet);
 }
 
 /**

@@ -3,11 +3,13 @@ import { bindSteps } from "./bind.ts";
 import { connectSteps } from "./connect.ts";
 import { type Attempted, beforeBind, boundOf, diagnosed, driveAsync } from "./drive.ts";
 import { Trace } from "./errors.ts";
+import { forNodeNet } from "./route.ts";
 import type { Bound, Connected, Options } from "./types.ts";
 import type { World } from "./world.ts";
 
 // The node:net side of the public API, on a given world (the tests hand
-// their own to force each route).
+// their own to force each route). Every spelling node:net is handed went
+// through forNodeNet, so none is read as a TCP port.
 
 /** Listens on spelling with a new net.Server, once it is listening or has failed. */
 export function listenAt(spelling: string): Promise<Attempted<net.Server>> {
@@ -22,10 +24,10 @@ export function listenAt(spelling: string): Promise<Attempted<net.Server>> {
   });
 }
 
-/** Connects to spelling with a new net.Socket, once it is connected or has failed. */
+/** Connects to spelling with a new net.Socket (as a path, never a port), once it is connected or has failed. */
 export function connectAt(spelling: string): Promise<Attempted<net.Socket>> {
   return new Promise((resolve) => {
-    const socket = net.connect(spelling);
+    const socket = net.connect({ path: spelling });
     const onError = (error: Error): void => resolve({ ok: false, error });
     socket.once("error", onError);
     socket.once("connect", () => {
@@ -36,23 +38,30 @@ export function connectAt(spelling: string): Promise<Attempted<net.Socket>> {
 }
 
 /**
- * The listener's address() returns the caller's path, not the spelling the
- * kernel keeps (DR-0002), when they differ.
+ * The listener's address() returns what the standard's returns, with the
+ * caller's path in place of the spelling the kernel keeps (DR-0002) when
+ * they differ: the path while it listens; once closed, whatever the
+ * standard gives then (Node keeps the name it listened on, Bun's node:net
+ * gives null), never the spelling.
  */
 function showPath(server: net.Server, path: string, spelt: string): void {
   if (spelt !== path) {
-    server.address = () => path;
+    const standard = server.address.bind(server);
+    server.address = () => {
+      const a = standard();
+      return a === spelt ? path : a;
+    };
   }
 }
 
 export async function bindIn(w: World, path: string): Promise<net.Server> {
-  const { result, socket } = await driveAsync(bindSteps(w, path, {}, new Trace(), "listen"), listenAt);
+  const { result, socket } = await driveAsync(bindSteps(w, path, {}, new Trace(), "listen", forNodeNet), listenAt);
   showPath(socket, path, result.spelt);
   return socket;
 }
 
 export async function connectIn(w: World, path: string): Promise<net.Socket> {
-  const { socket } = await driveAsync(connectSteps(w, path, {}, new Trace(), "connect"), connectAt);
+  const { socket } = await driveAsync(connectSteps(w, path, {}, new Trace(), "connect", forNodeNet), connectAt);
   return socket;
 }
 
@@ -65,7 +74,7 @@ export async function bindExIn(
   const trace = new Trace();
   try {
     const before = beforeBind(path);
-    const { result, socket } = await driveAsync(bindSteps(w, path, options, trace, "listen"), at);
+    const { result, socket } = await driveAsync(bindSteps(w, path, options, trace, "listen", forNodeNet), at);
     showPath(socket, path, result.spelt);
     return boundOf(path, before, result, socket, () => socket.close(), trace);
   } catch (e) {
@@ -81,7 +90,7 @@ export async function connectExIn(
 ): Promise<Connected<net.Socket>> {
   const trace = new Trace();
   try {
-    const { result, socket } = await driveAsync(connectSteps(w, path, options, trace, "connect"), at);
+    const { result, socket } = await driveAsync(connectSteps(w, path, options, trace, "connect", forNodeNet), at);
     return { socket, route: result.route, skipped: [...trace.skipped] };
   } catch (e) {
     throw diagnosed(e, trace);

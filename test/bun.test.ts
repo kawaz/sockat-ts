@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { describe, test } from "node:test";
 import { connect, connectEx, listen, listenEx } from "../src/bun.ts";
 import { listenExIn } from "../src/bunapi.ts";
-import { deepDir, linksInB, placeB, rejection, shortDir, skippedNames, tempDir, thrown, world } from "./helpers.ts";
+import { deepDir, linksInB, listing, placeB, rejection, shortDir, skippedNames, tempDir, thrown, world } from "./helpers.ts";
 
 // @kawaz/sockat/bun runs on Bun only: under Node these tests are skipped.
 const onBun = typeof process.versions["bun"] === "string";
@@ -109,5 +109,28 @@ describe("@kawaz/sockat/bun", { skip: !onBun && "Bun only" }, () => {
     const e = await rejection(connectEx({ unix: path, socket: { data() {} } }));
     assert.equal(e["code"], "ENOENT");
     assert.ok(typeof e["route"] === "string");
+  });
+});
+
+describe("@kawaz/sockat/bun, more", { skip: !onBun && "Bun only" }, () => {
+  // DR-0002: the listener's unix is the path given, after stop() too, as
+  // Bun's own listener keeps the path it was given.
+  test("a long path's listener's unix is the path, after stop too", () => {
+    const path = `${deepDir(tempDir())}/s.sock`;
+    const l = listen({ unix: path, socket: echoing });
+    assert.equal(l.unix, path);
+    l.stop(true);
+    assert.equal(l.unix, path);
+  });
+});
+
+describe("@kawaz/sockat/bun without Bun", { skip: onBun && "Node only" }, () => {
+  // Used without Bun, the entry throws at once, before anything is made in
+  // the places.
+  test("throws at once and makes nothing", async () => {
+    const before = listing(placeB());
+    assert.throws(() => listen({ unix: `${deepDir(tempDir())}/s.sock`, socket: echoing }), /needs Bun/);
+    await assert.rejects(connect({ unix: `${deepDir(tempDir())}/s.sock`, socket: { data() {} } }), /needs Bun/);
+    assert.deepEqual(listing(placeB()), before);
   });
 });

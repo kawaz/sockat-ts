@@ -73,6 +73,16 @@ describe("resolve", () => {
     await closeServer(server);
   });
 
+  // SPEC "ForBind の SocketFile": what the spelling leads to must be a
+  // socket; a regular file at the path (not bound) is ENOTSOCK.
+  test("socketFile of a path that leads to a file, not a socket, is ENOTSOCK", () => {
+    const path = `${deepDir(tempDir())}/s.sock`;
+    const f = resolveForBind(path);
+    fs.writeFileSync(path, "");
+    assert.equal(thrown(() => f.socketFile())["code"], "ENOTSOCK");
+    f.cleanup();
+  });
+
   // resolveForConnect: link-file through the process's D, used for as many
   // connects as wanted, and after cleanup() the spelling names nothing.
   test("resolveForConnect spells a long path for repeated connects until cleanup", async () => {

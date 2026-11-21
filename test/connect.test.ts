@@ -29,6 +29,9 @@ const ConnectOut = v.union([
   v.object({ ok: v.literal(false), code: v.nullable(v.string()), message: v.string() }),
 ]);
 
+/** What child.ts prints for a connect whose cwd changed. */
+const ChdirOut = v.object({ ok: v.literal(false), code: v.nullable(v.string()), message: v.string(), connected: v.boolean() });
+
 /** A listener at a long path under root (bound through sockat), echoing. */
 async function longListener(root: string, name = "s.sock"): Promise<{ path: string; close: () => Promise<void> }> {
   const path = `${deepDir(root)}/${name}`;
@@ -111,20 +114,26 @@ describe("connect", () => {
   });
 
   // SPEC "relative と cwd": a cwd changed while connecting through a
-  // relative spelling is a general error (no errno), the result discarded.
-  test("relative with the cwd changed meanwhile is a general error", async () => {
-    const l = await longListener(tempDir());
-    const r = await child(
-      { op: "connect-ex-chdir", path: l.path, chdirTo: "/", noProc: true },
-      nodePath.dirname(nodePath.dirname(l.path)),
-    );
-    const out = v.parse(ConnectOut, r.out);
-    assert.ok(!out.ok);
-    assert.equal(out.code, null);
-    assert.match(out.message, /current directory changed/);
-    await r.end();
-    await l.close();
-  });
+  // relative spelling is a general error (no errno). Changed after the
+  // connect went through, the connected socket is discarded; changed before,
+  // the connect from the other cwd fails and the same general error is
+  // returned (the spelling may have reached another place).
+  for (const when of ["after", "before"] as const) {
+    test(`relative with the cwd changed ${when} the connect is a general error`, async () => {
+      const l = await longListener(tempDir());
+      const r = await child(
+        { op: "connect-ex-chdir", path: l.path, chdirTo: "/", when, noProc: true },
+        nodePath.dirname(nodePath.dirname(l.path)),
+      );
+      const out = v.parse(ChdirOut, r.out);
+      assert.equal(out.ok, false);
+      assert.equal(out.code, null);
+      assert.match(out.message, /current directory changed/);
+      assert.equal(out.connected, when === "after", "the connect went through only when the cwd changed after it");
+      await r.end();
+      await l.close();
+    });
+  }
 
   // proc-direct (Linux with /proc): /proc/self/fd/<dir fd>/<name>, no E.
   test("proc-direct connects through /proc/self/fd on Linux", { skip: os !== "linux" && "Linux only" }, async () => {
@@ -176,6 +185,25 @@ describe("connect", () => {
     assert.equal(s.route, "link-file");
     assert.equal(w.auto?.d ?? null, null);
     s.socket.destroy();
+    await l.close();
+  });
+
+  // A standard that throws at once rather than failing later (Bun.connect
+  // without socket handlers throws a TypeError) is a failure of the route
+  // like any other: link-file's E in B is removed, and the error is the
+  // standard's own (it shows no spelling).
+  test("a standard throwing at once leaves no E in B", async () => {
+    const l = await longListener(shortDir());
+    const w = world({ proc: "" });
+    const before = listing(placeB());
+    const e = await rejection(
+      connectExIn(w, l.path, {}, () => {
+        throw new TypeError("SocketOptions.socket is required");
+      }),
+    );
+    assert.ok(e.error instanceof TypeError);
+    assert.equal(e["route"], "link-file");
+    assert.deepEqual(listing(placeB()), before);
     await l.close();
   });
 

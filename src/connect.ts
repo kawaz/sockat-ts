@@ -3,7 +3,7 @@ import { type CallSite, cwdChangedError, systemError, type Trace, Unusable } fro
 import { attempt, closeQuietly, entry, type FileId, fstatId, oPath, procAt, realDir, sameId, statId } from "./fsx.ts";
 import { createAt, randomLength } from "./names.ts";
 import { below, byteLength, isAbs, joinUnder, relativeTo, splitPath } from "./paths.ts";
-import { absTarget, classify, cwdId, lookUpDir, noNative, type Outcome, type RouteName, routeFailure, type SocketDir } from "./route.ts";
+import { absTarget, classify, cwdId, lookUpDir, noNative, type Outcome, type RouteName, routeFailure, type SocketDir, type StandardSpelling } from "./route.ts";
 import type { Options } from "./types.ts";
 import { type Base, type World } from "./world.ts";
 
@@ -112,9 +112,10 @@ function cwdSpellings(cwd: string, id: FileId): string[] {
  * otherwise (only when that gives nothing short enough) through real paths,
  * climbing out of the cwd with "..". The shorter is kept, and used only when
  * its directory is the absolute one and the cwd did not change meanwhile.
+ * Lengths are those of the spelling as the standard is handed it (spell).
  * null when there is no such spelling of at most max bytes.
  */
-export function newRelative(path: string, dir: string, max: number): Relative | null {
+export function newRelative(path: string, dir: string, max: number, spell: StandardSpelling): Relative | null {
   const parts = splitPath(path);
   if (!isAbs(path) || parts === null) {
     return null;
@@ -126,7 +127,7 @@ export function newRelative(path: string, dir: string, max: number): Relative | 
   }
   let best: string | null = null;
   const keep = (rel: string): void => {
-    if (best === null || byteLength(rel) < byteLength(best)) {
+    if (best === null || byteLength(spell(rel)) < byteLength(spell(best))) {
       best = rel;
     }
   };
@@ -136,7 +137,7 @@ export function newRelative(path: string, dir: string, max: number): Relative | 
       keep(rel);
     }
   }
-  const fitsNow = (): boolean => best !== null && byteLength(best) <= max;
+  const fitsNow = (): boolean => best !== null && byteLength(spell(best)) <= max;
   if (!fitsNow()) {
     const real = realDir(dir);
     if (real.ok) {
@@ -147,7 +148,7 @@ export function newRelative(path: string, dir: string, max: number): Relative | 
     }
   }
   const chosen: string | null = best;
-  if (chosen === null || byteLength(chosen) > max) {
+  if (chosen === null || byteLength(spell(chosen)) > max) {
     return null;
   }
   const relParts = splitPath(chosen);
@@ -163,7 +164,7 @@ export function newRelative(path: string, dir: string, max: number): Relative | 
   if (now === null || !sameId(now, before)) {
     return null;
   }
-  return { spelling: chosen, cwd: before };
+  return { spelling: spell(chosen), cwd: before };
 }
 
 /** What a route does after its connect when it has nothing to do. */
@@ -182,7 +183,7 @@ function linkConnectLen(breal: string): number {
  * path, is no place for it.
  */
 function connectBase(c: ConnectCall): Base | Unusable {
-  const fits = (_kind: string, breal: string): boolean => linkConnectLen(breal) <= c.w.cfg.standardLength;
+  const fits = (_kind: string, breal: string): boolean => linkConnectLen(breal) <= c.w.cfg.spellingLength;
   if (c.opts.base !== undefined) {
     return c.w.givenBase(c.opts.base, fits, c.site);
   }
@@ -196,10 +197,18 @@ function connectBase(c: ConnectCall): Base | Unusable {
  * while the cwd changed (a general error); link-file unlinks its E right
  * after, whatever the outcome.
  */
-export function* connectSteps(w: World, path: string, opts: Options, trace: Trace, syscall: string): Generator<string, ConnectResult, Outcome> {
+export function* connectSteps(
+  w: World,
+  path: string,
+  opts: Options,
+  trace: Trace,
+  syscall: string,
+  spell: StandardSpelling,
+): Generator<string, ConnectResult, Outcome> {
   const site: CallSite = { syscall, path };
-  if (classify(w, path, opts) !== "long") {
-    const o = yield path;
+  const kind = classify(w, path, opts, spell);
+  if (kind.kind !== "long") {
+    const o = yield kind.spelt;
     trace.route = "standard";
     if (!o.ok) {
       throw o.error;
@@ -225,7 +234,7 @@ export function* connectSteps(w: World, path: string, opts: Options, trace: Trac
             continue;
           }
           spelling = `${w.cfg.proc}/self/fd/${c.sdir}/${dir.name}`;
-          if (byteLength(spelling) > w.cfg.standardLength) {
+          if (byteLength(spelling) > w.cfg.spellingLength) {
             trace.skip(route, "spelling too long");
             continue;
           }
@@ -236,7 +245,7 @@ export function* connectSteps(w: World, path: string, opts: Options, trace: Trac
             trace.skip(route, "path not absolute");
             continue;
           }
-          const rel = newRelative(path, dir.dir, w.cfg.standardLength);
+          const rel = newRelative(path, dir.dir, w.cfg.spellingLength, spell);
           if (rel === null) {
             trace.skip(route, "no relative spelling");
             continue;
@@ -265,7 +274,7 @@ export function* connectSteps(w: World, path: string, opts: Options, trace: Trac
             trace.skip(route, b.reason);
             continue;
           }
-          if (linkConnectLen(b.real) > w.cfg.standardLength) {
+          if (linkConnectLen(b.real) > w.cfg.spellingLength) {
             trace.skip(route, "spelling too long");
             continue;
           }
@@ -291,7 +300,7 @@ export function* connectSteps(w: World, path: string, opts: Options, trace: Trac
       after(o);
       trace.route = route;
       if (!o.ok) {
-        throw routeFailure(o.error, site);
+        throw routeFailure(o.error, site, spelling);
       }
       return { route };
     }

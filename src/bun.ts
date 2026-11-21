@@ -9,7 +9,7 @@
  *
  * @module
  */
-import { connectExIn, connectIn, listenExIn, listenIn } from "./bunapi.ts";
+import { connectExIn, connectIn, listenExIn, listenIn, requireBun } from "./bunapi.ts";
 import type { Bound, Connected, Options } from "./types.ts";
 import { defaultWorld } from "./world.ts";
 
@@ -24,11 +24,13 @@ export type { RouteDiagnostics, SystemError } from "./errors.ts";
  * removes the symlink and leaves the socket file.
  */
 export function listen<Data = undefined>(options: Bun.UnixSocketOptions<Data>): Bun.UnixSocketListener<Data> {
+  requireBun();
   return listenIn(defaultWorld(), options);
 }
 
 /** `Bun.connect(options)` for a `unix` path of any length. */
-export function connect<Data = undefined>(options: Bun.UnixSocketOptions<Data>): Promise<Bun.Socket<Data>> {
+export async function connect<Data = undefined>(options: Bun.UnixSocketOptions<Data>): Promise<Bun.Socket<Data>> {
+  requireBun();
   return connectIn(defaultWorld(), options);
 }
 
@@ -44,13 +46,15 @@ export function listenEx<Data = undefined>(
   options: Bun.UnixSocketOptions<Data>,
   sockatOptions: Options = {},
 ): Bound<Bun.UnixSocketListener<Data>> {
+  requireBun();
   return listenExIn(defaultWorld(), options, sockatOptions);
 }
 
 /** connect, with diagnostics. The error carries `route` and `skipped`. */
-export function connectEx<Data = undefined>(
+export async function connectEx<Data = undefined>(
   options: Bun.UnixSocketOptions<Data>,
   sockatOptions: Options = {},
 ): Promise<Connected<Bun.Socket<Data>>> {
+  requireBun();
   return connectExIn(defaultWorld(), options, sockatOptions);
 }

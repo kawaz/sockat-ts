@@ -83,11 +83,14 @@ export function modeBits(st: fs.BigIntStats): number {
 }
 
 /**
- * dir as a real path (symlinks resolved, absolute), made absolute against
- * the cwd first so every component is looked up.
+ * dir as a real path (symlinks resolved, absolute), by realpath(3): the
+ * system looks up every component, ".." included, as the kernel does (a
+ * "sym/.." is the parent of the symlink's target, not the directory the
+ * symlink is in). The path is never folded as a string (SPEC "長いパスの経路と
+ * 試す順番": パスを字句で畳まない).
  */
 export function realDir(dir: string): Result<string> {
-  return attempt(() => fs.realpathSync(nodePath.resolve(dir)));
+  return attempt(() => fs.realpathSync.native(dir));
 }
 
 /**

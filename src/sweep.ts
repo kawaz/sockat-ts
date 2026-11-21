@@ -58,6 +58,13 @@ export function sweepBaseIn(w: World, base: string): void {
     }
     throw systemError(real.code, "sweep", base);
   }
+  const st = attempt(() => fs.statSync(real.value));
+  if (!st.ok) {
+    throw systemError(st.code, "sweep", base);
+  }
+  if (!st.value.isDirectory()) {
+    throw systemError("ENOTDIR", "sweep", base);
+  }
   if (checkAncestors(real.value, false) !== null) {
     throw systemError("EPERM", "sweep", base);
   }

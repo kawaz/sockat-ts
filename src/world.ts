@@ -45,8 +45,14 @@ export interface Base extends HeldDir {
   readonly fd: number;
   readonly id: FileId;
   readonly kind: BaseKind;
-  /** B and every directory on the way to it let others search it (mode & 0o001). */
-  readonly crossUID: boolean;
+  /** Every directory on the way to B lets others search it (mode & 0o001), as seen when B was first held. */
+  readonly ancestorsX: boolean;
+  /**
+   * B itself lets others search it. Remembered when true; when false it is
+   * looked at again (crossOf), since a process making B at the same time may
+   * have opened it between its mkdir (0700) and its chmod (0711).
+   */
+  selfX: boolean;
   /** The place before its real path was resolved, or B's real path, goes through a private /tmp's directory. */
   readonly tmpPath: boolean;
   /** This process's D in B, made at most once (ownD). */
@@ -212,7 +218,7 @@ export class World {
       if (this.autoCross !== null) {
         return this.autoCross;
       }
-      if (this.auto !== null && this.auto.crossUID) {
+      if (this.auto !== null && crossOf(this.auto)) {
         this.autoCross = this.auto;
         return this.auto;
       }
@@ -234,7 +240,7 @@ export class World {
       }
       const b = this.known(made.value);
       if (cross) {
-        if (!b.crossUID) {
+        if (!crossOf(b)) {
           // Not for this call; held only when it is auto already.
           if (b !== this.auto) {
             closeQuietly(b.fd);
@@ -352,7 +358,7 @@ export class World {
     }
     const held = this.given.get(key({ dev: st.value.dev, ino: st.value.ino }));
     if (held !== undefined) {
-      if (!held.crossUID) {
+      if (!crossOf(held)) {
         fail("EPERM");
       }
       return;
@@ -478,7 +484,8 @@ export class World {
           real: breal,
           at: this.cfg.os === "linux" ? procAt(this.cfg.proc, fd, id) : null,
           kind: p.kind,
-          crossUID: (modeBits(st.value) & 0o001) !== 0 && checkAncestors(real, true) === null,
+          ancestorsX: checkAncestors(real, true) === null,
+          selfX: (modeBits(st.value) & 0o001) !== 0,
           tmpPath: this.throughPrivateTmp(p.path) || this.throughPrivateTmp(breal),
           d: null,
           nextE: 0,
@@ -565,7 +572,9 @@ export class World {
    * random name, set to 0711, opened without following a symlink with a
    * shared lock taken (openLocked) and checked to be a directory of ours, and
    * its name looked up again. A D taken away before it was locked (another
-   * process's sweep saw it unlocked) is "takenAway", its fd closed.
+   * process's sweep saw it unlocked: the chmod or the open finds nothing,
+   * the lock is busy, or the name names another) is "takenAway", and the
+   * next name is tried; what this call made of it is removed first.
    */
   private makeOwnD(b: Base): ProcD | null | "takenAway" {
     const r = attempt(() => createAt(this.cfg.random, (n) => fs.mkdirSync(entry(b, n), 0o700)));
@@ -580,17 +589,18 @@ export class World {
         attempt(() => fs.rmdirSync(at));
       }
     };
-    if (!attempt(() => fs.chmodSync(at, 0o711)).ok) {
+    const ch = attempt(() => fs.chmodSync(at, 0o711));
+    if (!ch.ok) {
       drop();
-      return null;
+      return ch.code === "ENOENT" ? "takenAway" : null;
     }
     const locked = openLocked(at, this.cfg.lock, "shared");
     if (!locked.ok) {
-      if (locked.why === "busy") {
-        return "takenAway";
-      }
+      // An empty D of ours is removed either way: a lock that keeps being
+      // busy (flock(1) failing otherwise than on a conflict) must not leave
+      // one behind per name tried.
       drop();
-      return null;
+      return locked.why === "busy" || locked.code === "ENOENT" ? "takenAway" : null;
     }
     const fd = locked.fd;
     const held = fstat(fd);
@@ -631,6 +641,19 @@ export class World {
 /** The name of B in a place of kind: sockat-<euid>, sockat under $XDG_RUNTIME_DIR. */
 export function bName(kind: BaseKind): string {
   return kind === "runtime" ? "sockat" : `sockat-${euid()}`;
+}
+
+/**
+ * Whether others can follow a real-path spelling through b: every directory
+ * on the way and B itself let them search (SPEC-routes "実体の置き場"). B's own
+ * mode is looked at again by its fd while it was found without it.
+ */
+export function crossOf(b: Base): boolean {
+  if (!b.selfX) {
+    const st = fstat(b.fd);
+    b.selfX = st.ok && (modeBits(st.value) & 0o001) !== 0;
+  }
+  return b.ancestorsX && b.selfX;
 }
 
 /** Whether B was removed since it was opened. */

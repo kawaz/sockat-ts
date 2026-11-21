@@ -2,9 +2,9 @@ import { type CallSite, systemError, type Trace, Unusable } from "./errors.ts";
 import { lstat, sameId, statId } from "./fsx.ts";
 import { randomLength } from "./names.ts";
 import { byteLength } from "./paths.ts";
-import { absTarget, classify, lookUpDir, noNative, type Outcome, type RouteName, routeFailure, type SocketDir } from "./route.ts";
+import { absTarget, classify, lookUpDir, noNative, type Outcome, type RouteName, routeFailure, type SocketDir, type StandardSpelling } from "./route.ts";
 import type { Options, Spelling } from "./types.ts";
-import { type Base, type Fits, type Link, type ProcD, removeLink, type World } from "./world.ts";
+import { type Base, crossOf, type Fits, type Link, type ProcD, removeLink, type World } from "./world.ts";
 
 // The bind order of a long path (SPEC "bind の順", DR-0002):
 //
@@ -134,7 +134,7 @@ function linkedSpelling(b: Base, viaProc: boolean, removable: boolean): Spelling
   if (viaProc) {
     return { kind: "Linked", removable, until: "Process", usableCrossUid: false, usableWithPrivateTmp: true };
   }
-  return { kind: "Linked", removable, until: "Cleanup", usableCrossUid: b.crossUID, usableWithPrivateTmp: !b.tmpPath };
+  return { kind: "Linked", removable, until: "Cleanup", usableCrossUid: crossOf(b), usableWithPrivateTmp: !b.tmpPath };
 }
 
 /**
@@ -173,7 +173,7 @@ function throughB(
   size: (bspell: string, e: string) => number,
 ): Linked | Unusable {
   const w = c.w;
-  const max = w.cfg.standardLength;
+  const max = w.cfg.spellingLength;
   const fits: Fits = (kind, breal) => {
     const p = procBShortest(w);
     if (useProc && p !== null && size(p, "0") <= max) {
@@ -264,17 +264,24 @@ function bindOrder(w: World): RouteName[] {
  * route that bound and failed removes its E and throws the standard's errno
  * with the caller's path. ENAMETOOLONG when no route can be used.
  */
-export function* bindSteps(w: World, path: string, opts: Options, trace: Trace, syscall: string): Generator<string, BindResult, Outcome> {
+export function* bindSteps(
+  w: World,
+  path: string,
+  opts: Options,
+  trace: Trace,
+  syscall: string,
+  spell: StandardSpelling,
+): Generator<string, BindResult, Outcome> {
   const site: CallSite = { syscall, path };
-  const kind = classify(w, path, opts);
-  if (kind !== "long") {
-    const o = yield path;
+  const kind = classify(w, path, opts, spell);
+  if (kind.kind !== "long") {
+    const o = yield kind.spelt;
     trace.route = "standard";
     if (!o.ok) {
       throw o.error;
     }
-    const spelling: Spelling = kind === "short" && !path.startsWith("/") ? { kind: "CwdRelative" } : { kind: "Original" };
-    return { route: "standard", spelling, base: null, link: null, spelt: path };
+    const spelling: Spelling = kind.kind === "short" && !path.startsWith("/") ? { kind: "CwdRelative" } : { kind: "Original" };
+    return { route: "standard", spelling, base: null, link: null, spelt: kind.spelt };
   }
   const c = newBindCall(w, path, opts, site);
   trace.skip("standard", "path too long");
@@ -310,12 +317,17 @@ export function* bindSteps(w: World, path: string, opts: Options, trace: Trace, 
     }
     // A failure to remove E is not reported: the bind's error is the call's.
     removeLink(ln.link);
-    if (route === "link-file" && !lstat(target).ok) {
+    // Where bind(2) is not known to follow a symlink, a failure with nothing
+    // at the path is taken for one that did not follow it (SPEC-routes
+    // "link-file"). Where it is known to follow, the failure is real
+    // (EACCES, ...): no route after link-file here (thread-cwd is not made)
+    // would meet it again and return it.
+    if (route === "link-file" && w.cfg.bindFollows === "unknown" && !lstat(target).ok) {
       trace.skip(route, "bind did not follow the symlink");
       continue;
     }
     trace.route = route;
-    throw routeFailure(o.error, site);
+    throw routeFailure(o.error, site, ln.spelling);
   }
   throw systemError("ENAMETOOLONG", syscall, path);
 }

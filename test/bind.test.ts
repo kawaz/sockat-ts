@@ -328,6 +328,37 @@ describe("bind", () => {
     }
   });
 
+  // Where bind(2) is known to follow a symlink (macOS), link-file's failure
+  // is real and returned as it is: a directory that cannot be written to is
+  // EACCES from link-file, not ENAMETOOLONG (no route after it here would
+  // meet the failure again).
+  test(
+    "link-file's real failure is returned where bind follows a symlink",
+    { skip: (world().cfg.bindFollows !== "yes" || process.geteuid?.() === 0) && "macOS, not root" },
+    async () => {
+      const dir = deepDir(tempDir());
+      fs.chmodSync(dir, 0o555);
+      const e = await rejection(bindExIn(world(), `${dir}/${"n".repeat(100)}`, {}));
+      fs.chmodSync(dir, 0o755);
+      assert.equal(e["code"], "EACCES");
+      assert.equal(e["route"], "link-file");
+    },
+  );
+
+  // DR-0002: the overridden address() is the standard's with the path in
+  // place of the spelling: the path while the listener listens, and once it
+  // is closed what the standard gives then (Node keeps the name, Bun's
+  // node:net gives null), never the spelling.
+  test("address() of a long path's listener is the path, and the standard's value once closed", async () => {
+    const path = `${deepDir(tempDir())}/s.sock`;
+    const b = await bindEx(path);
+    assert.equal(b.socket.address(), path);
+    b.file.remove();
+    await closeServer(b.socket);
+    const after = b.socket.address();
+    assert.ok(after === null || after === path, JSON.stringify(after));
+  });
+
   // SPEC "カーネルが返すアドレス": the addresses of a long path's listener,
   // of a connection accepted on it and of a socket connected to it can be
   // taken without failing.
