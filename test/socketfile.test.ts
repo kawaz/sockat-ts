@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import net from "node:net";
 import { describe, test } from "node:test";
 import { bindEx } from "../src/index.ts";
 import { bindExIn, listenAt } from "../src/netapi.ts";
@@ -111,15 +112,19 @@ describe("SocketFile, more", () => {
     assert.equal(fs.readFileSync(path, "utf8"), "precious");
   });
 
-  // A short path goes to the standard as it is, and the standard's close
-  // unlinks the path: what replaced the socket goes with it (SPEC からの
-  // 外れ, README). The error says so.
-  test("bindEx that cannot record the socket says the close unlinked a short path", async () => {
+  // DR-0004: a short absolute path goes to the standard as it is, whose
+  // close unlinks the path. When the socket was replaced right after the
+  // bind (so it could not be recorded), the path does not name the socket
+  // bound: the listener is left open and unref'd rather than closed, and
+  // the replacement stays.
+  test("bindEx that cannot record a short absolute path leaves its replacement and does not close", async () => {
     const path = `${shortDir()}/s.sock`;
+    const held: { server: net.Server | null } = { server: null };
     const e = await rejection(
       bindExIn(world(), path, {}, async (spelling) => {
         const a = await listenAt(spelling);
         if (a.ok) {
+          held.server = a.socket;
           fs.unlinkSync(path);
           fs.writeFileSync(path, "precious");
         }
@@ -127,6 +132,12 @@ describe("SocketFile, more", () => {
       }),
     );
     assert.equal(e["route"], "standard");
-    assert.match(e.error.message, /which unlinks the path/);
+    assert.match(e.error.message, /left open and unref'd/);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(fs.readFileSync(path, "utf8"), "precious");
+    const left = held.server;
+    assert.ok(left !== null);
+    assert.ok(left.listening, "the listener was not closed");
+    left.close();
   });
 });

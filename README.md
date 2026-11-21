@@ -64,7 +64,7 @@ b.socket.close();
 
 What `file.remove()` and `file.cleanup()` promise is in [SPEC's "Cleanup"](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md#cleanup). Specific to sockat-ts:
 
-- When the file cannot be recorded, `bindEx` removes the spelling's symlink before closing the listener and fails (what replaced the file stays). For a short path the standard library unlinks the path on close
+- When the file cannot be recorded, `bindEx` fails. For a long path it removes the spelling's symlink before closing the listener (what replaced the file stays). For a short path it closes the listener only where that is known to unlink the socket bound alone, and otherwise leaves it open and `unref()`'d ([Where it departs from SPEC](#where-it-departs-from-spec))
 - The listener of `bindEx` / `listenEx` too unlinks its spelling when closed ([Where it departs from SPEC](#where-it-departs-from-spec)). Call `remove()` before closing it
 
 ### What a spelling is good for (`Spelling`)
@@ -186,8 +186,8 @@ On a Linux where `/proc` is not visible (an empty tmpfs mounted over it, for exa
 
 - What only the routes not made (above) reach is not reached
 - **The listener of `bindEx` / `listenEx` too unlinks its spelling when closed** (SPEC: "the listener of `_ex` removes nothing when closed"; the runtimes give no way to stop it). Call `file.remove()` before closing it
-- When `bindEx` / `listenEx` cannot record the file of a short absolute path, the standard library unlinks the path as the listener is closed, so whatever replaced the socket goes too
-- When the file of a short relative path cannot be recorded because the cwd changed during the bind, the listener is closed only where that is known to unlink the socket bound and nothing else; otherwise it is left open and `unref()`'d, and the socket file stays where it was bound ([DR-0004](docs/decisions/DR-0004-close-relative-listener-only-when-ours.md)). The standard library unlinks a relative path against the cwd at the close, so a process that changes its cwd makes the path absolute before the bind
+- When `bindEx` / `listenEx` cannot record the file of a short path (the socket was replaced right after the bind, or for a relative path the cwd changed during the bind), the listener is closed only where that is known to unlink the socket bound and nothing else; otherwise it is left open and `unref()`'d, and what replaced the socket, and the socket file bound, stay ([DR-0004](docs/decisions/DR-0004-close-relative-listener-only-when-ours.md)). The standard library unlinks the path when it closes (a relative one against the cwd at the close), so applying SPEC's "close" as it is would remove them
+- The standard library unlinks a relative path against the cwd at the close, so a process that changes its cwd makes the path absolute before the bind
 - No DGRAM and no SEQPACKET (the standard libraries of Node and Bun have none)
 - The errors of a short path are the standard library's (Node's listen says `EACCES` for a missing directory); a long path's are SPEC's errno (`ENOENT`)
 

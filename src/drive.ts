@@ -122,16 +122,23 @@ export interface Release {
 }
 
 /**
- * Whether closing the listener of a short relative path, whose cwd changed
- * during bindEx, unlinks the socket bound and nothing else (DR-0004): the
- * standard unlinks the relative path against the cwd at the close, so it is
- * only when the bind happened in the cwd there is now (bindCwd) and the
- * path names, there, the socket recorded right after the bind.
+ * Whether closing the listener of a short path that bindEx could not
+ * record unlinks the socket bound and nothing else (DR-0004): the standard
+ * unlinks the path itself at the close, so it is only when the path names
+ * the socket recorded right after the bind. A relative path is unlinked
+ * against the cwd at the close, so the bind must also have happened in the
+ * cwd there is now (bindCwd). Where nothing was recorded, nothing can be
+ * told to be the socket bound.
  */
-function closeUnlinksOurs(path: string, bindCwd: FileId | null, recorded: { id: FileId } | null): boolean {
-  const now = cwdId();
-  if (bindCwd === null || now === null || !sameId(bindCwd, now) || recorded === null) {
+function closeUnlinksOurs(path: string, relative: boolean, bindCwd: FileId | null, recorded: { id: FileId } | null): boolean {
+  if (recorded === null) {
     return false;
+  }
+  if (relative) {
+    const now = cwdId();
+    if (bindCwd === null || now === null || !sameId(bindCwd, now)) {
+      return false;
+    }
   }
   const at = lstatId(path);
   return at !== null && sameId(at, recorded.id);
@@ -171,12 +178,14 @@ export function boundOf<S>(
         // The error of the call is that the file could not be recorded.
       }
       let left: string;
-      if (result.link === null && before.relative && !closeUnlinksOurs(path, bindCwd, recorded)) {
-        // Closing would unlink the relative path against the cwd there is
-        // now, which is not (or cannot be told to be) the socket bound.
+      if (result.link === null && !closeUnlinksOurs(path, before.relative, bindCwd, recorded)) {
+        // Closing would unlink the path (against the cwd there is now, for
+        // a relative one), which is not, or cannot be told to be, the
+        // socket bound: whatever replaced it would go.
         release.unref();
-        left =
-          "the listener was left open and unref'd rather than closed (closing it would unlink the path in the current directory, which is not, or cannot be told to be, the socket bound); the socket file stays where it was bound";
+        left = before.relative
+          ? "the listener was left open and unref'd rather than closed (closing it would unlink the path in the current directory, which is not, or cannot be told to be, the socket bound); the socket file stays where it was bound"
+          : "the listener was left open and unref'd rather than closed (closing it would unlink the path, which is not, or cannot be told to be, the socket bound)";
       } else {
         release.close();
         left =
