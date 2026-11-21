@@ -186,7 +186,8 @@ On a Linux where `/proc` is not visible (an empty tmpfs mounted over it, for exa
 
 - What only the routes not made (above) reach is not reached
 - **The listener of `bindEx` / `listenEx` too unlinks its spelling when closed** (SPEC: "the listener of `_ex` removes nothing when closed"; the runtimes give no way to stop it). Call `file.remove()` before closing it
-- When `bindEx` / `listenEx` cannot record the file of a short path, the standard library unlinks the path as the listener is closed, so whatever replaced the socket goes too. A short relative path is unlinked against the cwd at the close, so when the cwd changed during the bind and the file could not be recorded, a file of that name where the cwd went may go. A process that changes its cwd makes the path absolute before the bind
+- When `bindEx` / `listenEx` cannot record the file of a short absolute path, the standard library unlinks the path as the listener is closed, so whatever replaced the socket goes too
+- When the file of a short relative path cannot be recorded because the cwd changed during the bind, the listener is closed only where that is known to unlink the socket bound and nothing else; otherwise it is left open and `unref()`'d, and the socket file stays where it was bound ([DR-0004](docs/decisions/DR-0004-close-relative-listener-only-when-ours.md)). The standard library unlinks a relative path against the cwd at the close, so a process that changes its cwd makes the path absolute before the bind
 - No DGRAM and no SEQPACKET (the standard libraries of Node and Bun have none)
 - The errors of a short path are the standard library's (Node's listen says `EACCES` for a missing directory); a long path's are SPEC's errno (`ENOENT`)
 

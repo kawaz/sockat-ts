@@ -10,7 +10,7 @@ import fs from "node:fs";
 import net from "node:net";
 import * as v from "valibot";
 import { errnoCode } from "../src/errors.ts";
-import { bindExIn, connectAt, connectExIn } from "../src/netapi.ts";
+import { bindExIn, connectAt, connectExIn, listenAt } from "../src/netapi.ts";
 import { resolveForBindIn } from "../src/resolve.ts";
 import { world } from "./helpers.ts";
 
@@ -25,6 +25,13 @@ const Command = v.variant("op", [
     noProc: v.optional(v.boolean()),
   }),
   v.object({ op: v.literal("bind-ex-remove"), path: v.string(), look: v.array(v.string()) }),
+  v.object({
+    op: v.literal("bind-ex-chdir"),
+    path: v.string(),
+    chdirTo: v.string(),
+    when: v.picklist(["before", "after"]),
+    look: v.array(v.string()),
+  }),
   v.object({ op: v.literal("numeric"), name: v.string(), long: v.string() }),
 ]);
 
@@ -120,6 +127,27 @@ switch (cmd.op) {
       print({ ok: true, route: b.route, bound, removed });
     } catch (e) {
       print(failure(e));
+    }
+    break;
+  }
+  case "bind-ex-chdir": {
+    // bindEx of a relative path whose cwd changes just before, or just
+    // after, the bind: what is at each path to look at afterwards.
+    try {
+      const b = await bindExIn(world(), cmd.path, {}, async (spelling) => {
+        if (cmd.when === "before") {
+          process.chdir(cmd.chdirTo);
+        }
+        const a = await listenAt(spelling);
+        if (cmd.when === "after") {
+          process.chdir(cmd.chdirTo);
+        }
+        return a;
+      });
+      b.socket.close();
+      print({ ok: true, look: kinds(cmd.look) });
+    } catch (e) {
+      print({ ...failure(e), look: kinds(cmd.look) });
     }
     break;
   }

@@ -3,7 +3,8 @@ import { bindSteps } from "./bind.ts";
 import { connectSteps } from "./connect.ts";
 import { type Attempted, beforeBind, boundOf, diagnosed, driveAsync } from "./drive.ts";
 import { Trace } from "./errors.ts";
-import { forNodeNet } from "./route.ts";
+import { type FileId, sameId } from "./fsx.ts";
+import { cwdId, forNodeNet } from "./route.ts";
 import type { Bound, Connected, Options } from "./types.ts";
 import type { World } from "./world.ts";
 
@@ -17,10 +18,16 @@ export function listenAt(spelling: string): Promise<Attempted<net.Server>> {
     const server = net.createServer();
     const onError = (error: Error): void => resolve({ ok: false, error });
     server.once("error", onError);
+    // node:net binds within listen() (the server listens when it returns);
+    // the cwd the same before and after it is the cwd the bind went to.
+    const cwd = cwdId();
+    let bindCwd: FileId | null = null;
     server.listen(spelling, () => {
       server.off("error", onError);
-      resolve({ ok: true, socket: server, close: () => server.close() });
+      resolve({ ok: true, socket: server, close: () => server.close(), bindCwd });
     });
+    const after = cwdId();
+    bindCwd = server.listening && cwd !== null && after !== null && sameId(cwd, after) ? cwd : null;
   });
 }
 
@@ -32,7 +39,7 @@ export function connectAt(spelling: string): Promise<Attempted<net.Socket>> {
     socket.once("error", onError);
     socket.once("connect", () => {
       socket.off("error", onError);
-      resolve({ ok: true, socket, close: () => socket.destroy() });
+      resolve({ ok: true, socket, close: () => socket.destroy(), bindCwd: null });
     });
   });
 }
@@ -74,9 +81,9 @@ export async function bindExIn(
   const trace = new Trace();
   try {
     const before = beforeBind(path);
-    const { result, socket } = await driveAsync(bindSteps(w, path, options, trace, "listen", forNodeNet, false), at);
+    const { result, socket, bindCwd } = await driveAsync(bindSteps(w, path, options, trace, "listen", forNodeNet, false), at);
     showPath(socket, path, result.spelt);
-    return boundOf(path, before, result, socket, () => socket.close(), trace);
+    return boundOf(path, before, result, socket, bindCwd, { close: () => socket.close(), unref: () => socket.unref() }, trace);
   } catch (e) {
     throw diagnosed(e, trace);
   }

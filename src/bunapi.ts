@@ -3,7 +3,8 @@ import { bindSteps } from "./bind.ts";
 import { connectSteps } from "./connect.ts";
 import { type Attempted, beforeBind, boundOf, diagnosed, driveAsync, driveSync } from "./drive.ts";
 import { asError, Trace } from "./errors.ts";
-import { asItIs } from "./route.ts";
+import { sameId } from "./fsx.ts";
+import { asItIs, cwdId } from "./route.ts";
 import type { Bound, Connected, Options } from "./types.ts";
 import type { World } from "./world.ts";
 
@@ -14,8 +15,13 @@ import type { World } from "./world.ts";
 function listenAt<Data>(options: Bun.UnixSocketOptions<Data>): (spelling: string) => Attempted<Bun.UnixSocketListener<Data>> {
   return (spelling) => {
     try {
+      // Bun.listen binds before it returns: the cwd the same before and
+      // after it is the cwd the bind went to.
+      const cwd = cwdId();
       const listener = Bun.listen({ ...options, unix: spelling });
-      return { ok: true, socket: listener, close: () => listener.stop(true) };
+      const after = cwdId();
+      const bindCwd = cwd !== null && after !== null && sameId(cwd, after) ? cwd : null;
+      return { ok: true, socket: listener, close: () => listener.stop(true), bindCwd };
     } catch (e) {
       return { ok: false, error: asError(e) };
     }
@@ -26,7 +32,7 @@ function listenAt<Data>(options: Bun.UnixSocketOptions<Data>): (spelling: string
 function connectAt<Data>(options: Bun.UnixSocketOptions<Data>): (spelling: string) => Promise<Attempted<Bun.Socket<Data>>> {
   return (spelling) =>
     Bun.connect({ ...options, unix: spelling }).then(
-      (socket): Attempted<Bun.Socket<Data>> => ({ ok: true, socket, close: () => socket.terminate() }),
+      (socket): Attempted<Bun.Socket<Data>> => ({ ok: true, socket, close: () => socket.terminate(), bindCwd: null }),
       (e: unknown): Attempted<Bun.Socket<Data>> => ({ ok: false, error: asError(e) }),
     );
 }
@@ -64,9 +70,9 @@ export function listenExIn<Data>(w: World, options: Bun.UnixSocketOptions<Data>,
   const path = options.unix;
   try {
     const before = beforeBind(path);
-    const { result, socket } = driveSync(bindSteps(w, path, sockatOptions, trace, "listen", asItIs, false), listenAt(options));
+    const { result, socket, bindCwd } = driveSync(bindSteps(w, path, sockatOptions, trace, "listen", asItIs, false), listenAt(options));
     showPath(socket, path, result.spelt);
-    return boundOf(path, before, result, socket, () => socket.stop(true), trace);
+    return boundOf(path, before, result, socket, bindCwd, { close: () => socket.stop(true), unref: () => socket.unref() }, trace);
   } catch (e) {
     throw diagnosed(e, trace);
   }

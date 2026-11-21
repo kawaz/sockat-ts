@@ -4,12 +4,16 @@ import { describe, test } from "node:test";
 import { standardLength, sockaddrLength } from "../src/config.ts";
 import { bindExIn, bindIn, connectAt, connectExIn, listenAt } from "../src/netapi.ts";
 import { resolveForBindIn } from "../src/resolve.ts";
-import { closeServer, deepDir, listing, rejection, shortDir, standardListen, tempDir, world } from "./helpers.ts";
+import * as v from "valibot";
+import { child, closeServer, deepDir, listing, rejection, shortDir, standardListen, tempDir, world } from "./helpers.ts";
 
 // What the external review (the hub's docs/research/2026-11-21-external-review-carbon.md)
 // found in sockat-ts, each made a test.
 
 const uid = process.geteuid?.() ?? 0;
+
+/** What child.ts prints for bind-ex-chdir. */
+const ChdirBindOut = v.object({ ok: v.boolean(), message: v.optional(v.string(), ""), look: v.array(v.string()) });
 
 /** A fresh place standing in for /tmp (1777, as /tmp is). */
 function freshPlace(): string {
@@ -90,6 +94,37 @@ describe("external review", () => {
     await closeServer(b.socket);
     await closeServer(other);
   });
+
+  // DR-0004 (1-6): bindEx of a short relative path that cannot record its
+  // file because the cwd changed. Changed after the bind, the standard's
+  // close would unlink the path in the new cwd, which holds an unrelated
+  // file: the listener is not closed (unref'd), and both files stay.
+  // Changed before the bind, the bind went to the new cwd and the path
+  // there is the socket bound: the listener is closed, which unlinks it, as
+  // SPEC has it, and the unrelated file in the old cwd stays.
+  for (const when of ["after", "before"] as const) {
+    test(`bindEx of a relative path whose cwd changed ${when} the bind closes only when that unlinks its own socket`, async () => {
+      const one = shortDir();
+      const two = shortDir();
+      const unrelated = when === "after" ? two : one;
+      fs.writeFileSync(`${unrelated}/s.sock`, "precious");
+      const r = await child(
+        { op: "bind-ex-chdir", path: "s.sock", chdirTo: two, when, look: [`${one}/s.sock`, `${two}/s.sock`] },
+        one,
+      );
+      const out = v.parse(ChdirBindOut, r.out);
+      assert.equal(out.ok, false);
+      if (when === "after") {
+        assert.match(out.message, /left open and unref'd/);
+        assert.deepEqual(out.look, ["socket", "file"], "the socket bound and the unrelated file both stay");
+      } else {
+        assert.match(out.message, /was closed, which unlinks the path/);
+        assert.deepEqual(out.look, ["file", "-"], "the socket bound goes, the unrelated file stays");
+      }
+      await r.end();
+      assert.equal(fs.readFileSync(`${unrelated}/s.sock`, "utf8"), "precious");
+    });
+  }
 
   // 2-1: Options.base with a NUL is an argument error whatever the path,
   // short and abstract included (SPEC "エラー").

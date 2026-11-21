@@ -185,7 +185,8 @@ Linux で `/proc` が見えない環境 (空の tmpfs を被せた等) では、
 
 - 作らない経路 (上の表) でしか届かない所に届かない
 - **`bindEx` / `listenEx` の listener も、閉じると綴りを unlink する** (SPEC は「`_ex` の listener は閉じても消さない」。runtime に止める口が無い)。`file.remove()` は閉じる前に呼ぶ
-- `bindEx` / `listenEx` がファイルを覚えられなかった時、短いパスは listener を閉じる時に標準がパスを unlink するので、その間に置き換わった物も消える。短い相対パスは閉じた時点の cwd で unlink されるので、bind の間に cwd が変わってファイルを覚えられなかった時は、移った先の同名のファイルが消えうる。cwd を変えるプロセスは、bind の前に絶対パスにする
+- `bindEx` / `listenEx` がファイルを覚えられなかった時、短い絶対パスは listener を閉じる時に標準がパスを unlink するので、その間に置き換わった物も消える
+- 短い相対パスで、bind の間に cwd が変わってファイルを覚えられなかった時は、閉じると bind したソケットだけが消えると確かめられる時にだけ閉じる。それ以外は listener を閉じずに `unref()` して手放し、ソケットのファイルは bind した所に残る ([DR-0004](docs/decisions/DR-0004-close-relative-listener-only-when-ours.md))。標準は閉じた時点の cwd で相対パスを unlink するので、cwd を変えるプロセスは bind の前に絶対パスにする
 - DGRAM と SEQPACKET は無い (Node と Bun の標準に無い)
 - 短いパスのエラーは標準のまま (Node の listen は無いディレクトリに `EACCES` を返す)。長いパスは SPEC の errno (`ENOENT`)
 

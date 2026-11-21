@@ -1,6 +1,6 @@
 import { asError, type Trace, withDiagnostics } from "./errors.ts";
 import type { BindResult } from "./bind.ts";
-import { realFile, sameId, socketAt } from "./fsx.ts";
+import { type FileId, lstatId, realFile, sameId, socketAt } from "./fsx.ts";
 import type { Outcome } from "./route.ts";
 import { cwdId } from "./route.ts";
 import { Cleaner, RecordedSocketFile } from "./socketfile.ts";
@@ -10,8 +10,16 @@ import type { Bound } from "./types.ts";
 // standard: node:net and Bun.connect answer later (async), Bun.listen at once
 // (sync). The steps are the same generator for both.
 
-/** What the standard did with a spelling: a socket, with how to discard it, or the error. */
-export type Attempted<S> = { readonly ok: true; readonly socket: S; readonly close: () => void } | { readonly ok: false; readonly error: Error };
+/**
+ * What the standard did with a spelling: a socket, with how to discard it,
+ * or the error. bindCwd is, for a listener, the cwd's (st_dev, st_ino) when
+ * the bind is known to have happened in it (the standard bound within the
+ * call, and the cwd was the same before and after it); null when that is
+ * not known, and for a connect.
+ */
+export type Attempted<S> =
+  | { readonly ok: true; readonly socket: S; readonly close: () => void; readonly bindCwd: FileId | null }
+  | { readonly ok: false; readonly error: Error };
 
 function toOutcome<S>(a: Attempted<S>): Outcome {
   return a.ok ? { ok: true, close: a.close } : { ok: false, error: a.error };
@@ -31,8 +39,8 @@ function thrownAsFailure<S>(e: unknown): Attempted<S> {
 export async function driveAsync<R, S>(
   steps: Generator<string, R, Outcome>,
   at: (spelling: string) => Promise<Attempted<S>>,
-): Promise<{ result: R; socket: S }> {
-  let held: { socket: S } | null = null;
+): Promise<{ result: R; socket: S; bindCwd: FileId | null }> {
+  let held: { socket: S; bindCwd: FileId | null } | null = null;
   let step = steps.next();
   while (step.done !== true) {
     let a: Attempted<S>;
@@ -41,18 +49,21 @@ export async function driveAsync<R, S>(
     } catch (e) {
       a = thrownAsFailure(e);
     }
-    held = a.ok ? { socket: a.socket } : null;
+    held = a.ok ? { socket: a.socket, bindCwd: a.bindCwd } : null;
     step = steps.next(toOutcome(a));
   }
   if (held === null) {
     throw new Error("sockat: internal error: the steps ended without a socket");
   }
-  return { result: step.value, socket: held.socket };
+  return { result: step.value, socket: held.socket, bindCwd: held.bindCwd };
 }
 
 /** Runs steps, handing each spelling to the sync standard at. */
-export function driveSync<R, S>(steps: Generator<string, R, Outcome>, at: (spelling: string) => Attempted<S>): { result: R; socket: S } {
-  let held: { socket: S } | null = null;
+export function driveSync<R, S>(
+  steps: Generator<string, R, Outcome>,
+  at: (spelling: string) => Attempted<S>,
+): { result: R; socket: S; bindCwd: FileId | null } {
+  let held: { socket: S; bindCwd: FileId | null } | null = null;
   let step = steps.next();
   while (step.done !== true) {
     let a: Attempted<S>;
@@ -61,13 +72,13 @@ export function driveSync<R, S>(steps: Generator<string, R, Outcome>, at: (spell
     } catch (e) {
       a = thrownAsFailure(e);
     }
-    held = a.ok ? { socket: a.socket } : null;
+    held = a.ok ? { socket: a.socket, bindCwd: a.bindCwd } : null;
     step = steps.next(toOutcome(a));
   }
   if (held === null) {
     throw new Error("sockat: internal error: the steps ended without a socket");
   }
-  return { result: step.value, socket: held.socket };
+  return { result: step.value, socket: held.socket, bindCwd: held.bindCwd };
 }
 
 /**
@@ -104,12 +115,35 @@ export function beforeBind(path: string): BeforeBind {
  * replaced the socket file stays. A spelling with no E (a path the standard
  * took as it is) is unlinked by the close all the same.
  */
+/** How bindEx lets go of a listener it does not return: closed, or left open and unref'd. */
+export interface Release {
+  readonly close: () => void;
+  readonly unref: () => void;
+}
+
+/**
+ * Whether closing the listener of a short relative path, whose cwd changed
+ * during bindEx, unlinks the socket bound and nothing else (DR-0004): the
+ * standard unlinks the relative path against the cwd at the close, so it is
+ * only when the bind happened in the cwd there is now (bindCwd) and the
+ * path names, there, the socket recorded right after the bind.
+ */
+function closeUnlinksOurs(path: string, bindCwd: FileId | null, recorded: { id: FileId } | null): boolean {
+  const now = cwdId();
+  if (bindCwd === null || now === null || !sameId(bindCwd, now) || recorded === null) {
+    return false;
+  }
+  const at = lstatId(path);
+  return at !== null && sameId(at, recorded.id);
+}
+
 export function boundOf<S>(
   path: string,
   before: BeforeBind,
   result: BindResult,
   socket: S,
-  discard: () => void,
+  bindCwd: FileId | null,
+  release: Release,
   trace: Trace,
 ): Bound<S> {
   const cleaner = new Cleaner(result.link, path);
@@ -136,13 +170,22 @@ export function boundOf<S>(
       } catch {
         // The error of the call is that the file could not be recorded.
       }
-      discard();
-      const left =
-        result.link === null
-          ? "the listener was closed, which unlinks the path"
-          : eGone
-            ? "the listener was closed and what is at the path left"
-            : "the listener was closed, which unlinks the spelling (its symlink could not be removed first)";
+      let left: string;
+      if (result.link === null && before.relative && !closeUnlinksOurs(path, bindCwd, recorded)) {
+        // Closing would unlink the relative path against the cwd there is
+        // now, which is not (or cannot be told to be) the socket bound.
+        release.unref();
+        left =
+          "the listener was left open and unref'd rather than closed (closing it would unlink the path in the current directory, which is not, or cannot be told to be, the socket bound); the socket file stays where it was bound";
+      } else {
+        release.close();
+        left =
+          result.link === null
+            ? "the listener was closed, which unlinks the path"
+            : eGone
+              ? "the listener was closed and what is at the path left"
+              : "the listener was closed, which unlinks the spelling (its symlink could not be removed first)";
+      }
       throw withDiagnostics(new Error(`listen ${path}: the socket file bound could not be recorded for its removal; ${left}`), trace);
     }
   }
