@@ -2,7 +2,7 @@
 
 > English | [日本語](./README-ja.md)
 
-Work in progress. This package will let TypeScript (Bun / Node.js) bind and connect Unix domain sockets at paths longer than `sun_path`.
+Work in progress. This package (`@kawaz/sockat`) will let TypeScript (Bun / Node.js) bind and connect Unix domain sockets at paths longer than `sun_path`.
 
 Version 0.0.0 has no code yet.
 

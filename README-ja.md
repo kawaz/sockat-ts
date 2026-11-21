@@ -2,7 +2,7 @@
 
 > [English](./README.md) | 日本語
 
-作成中。TypeScript (Bun / Node.js) から、`sun_path` の上限を超えるパスで Unix domain socket を bind / connect できるようにする package。
+作成中。`@kawaz/sockat` は TypeScript (Bun / Node.js) から、`sun_path` の上限を超えるパスで Unix domain socket を bind / connect できるようにする package。
 
 0.0.0 にはまだコードが無い。
 
