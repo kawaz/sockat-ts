@@ -19,9 +19,9 @@ sockat-ts は、`sun_path` の上限を超えるパスでも Unix domain socket 
 | `src/bunapi.ts` | `Bun.listen` / `Bun.connect` に綴りを渡す口と、world を引数に取る listen / connect の本体 |
 | `src/types.ts` | 公開の型 (`Options`・`Spelling`・`Bound`・`Connected`・`ForBind`・`ForConnect`・`SocketFile`) |
 | `src/errors.ts` | エラーの形 (Node の流儀の OS のエラー、`ERR_INVALID_ARG_VALUE`、一般のエラー、診断の `route`・`skipped`)、`Trace`、`Unusable`、errno の読み取り |
-| `src/config.ts` | 環境の読み方 (`Config`: OS、標準に渡す長さ、置き場の候補、`/proc`、bind が symlink を辿るか、乱数、ロックの手段) と `envConfig` |
+| `src/config.ts` | 環境の読み方 (`Config`: OS、標準に渡す長さ、綴りの上限 (sockaddr に入る長さ)、置き場の候補、`/proc`、bind が symlink を辿るか、乱数、ロックの手段) と `envConfig` |
 | `src/world.ts` | `World` (プロセスが持つ B)、B の作り方・確かめ方、D の作り方とロック、resolve の E、`defaultWorld` / `setDefaultWorld` (試験用) |
-| `src/route.ts` | 経路の前の検査 (`classify`: base の形・NUL・abstract・長さ)、ソケットのディレクトリを先に引く `lookUpDir`、経路の失敗のエラー |
+| `src/route.ts` | 経路の前の検査 (`classify`: base の形・空・NUL・abstract・長さ)、標準に渡す綴り (`forNodeNet`: 数値に読める綴りに `./`)、ソケットのディレクトリを先に引く `lookUpDir`、経路の失敗のエラー |
 | `src/bind.ts` | bind の列 (`bindSteps`: link-dir・link-file、作らない経路の skipped) と B を通る綴り (procB と実パス、長さの見積もり、`Spelling`) |
 | `src/connect.ts` | connect の列 (`connectSteps`: proc-direct・relative・link-file、作らない経路の skipped) と相対パスの作り方 |
 | `src/drive.ts` | 列 (generator) を標準に渡して回す `driveAsync` / `driveSync` と、`bindEx` の覚え方 (`beforeBind`・`boundOf`) |
@@ -32,7 +32,7 @@ sockat-ts は、`sun_path` の上限を超えるパスでも Unix domain socket 
 | `src/fsx.ts` | `(st_dev, st_ino)`、実パス、`socketAt`、`*at` の代わり (`/proc/self/fd/<fd>/<名前>` か確かめた実パス) |
 | `src/paths.ts` / `src/names.ts` | パスの算術、乱数の名前と `createAt` |
 | `conformance/cli.ts` | ハブの適合試験の CLI (`just conformance [node\|bun]`)。package に入らない |
-| `test/*.test.ts` | 試験 (`node:test` で書き、Node と Bun の両方で走る)。`helpers.ts` が試験専用の置き場と world を用意し、`child.ts` が cwd を変える試験を子プロセスで走らせる |
+| `test/*.test.ts` | 試験 (`node:test` で書き、Node と Bun の両方で走る)。`readme.test.ts` は README の推奨コードを動かす。`helpers.ts` が試験専用の置き場と world を用意し、`child.ts` が cwd を変える試験を子プロセスで走らせる |
 
 ## 試験
 
