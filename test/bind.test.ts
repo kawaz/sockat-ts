@@ -303,6 +303,30 @@ describe("bind", () => {
     }
   });
 
+  // DR-0002 "listener を閉じた時": closing unlinks the spelling the
+  // standard was given. Through link-dir's E that is the socket file at the
+  // path (as for a short path); through link-file's it is the E alone, and
+  // the socket file stays (SPEC "長いパスで標準と違う点").
+  test("closing a long path's listener unlinks its spelling", async () => {
+    const dir = deepDir(tempDir());
+    const a = await bindExIn(world(), `${dir}/s.sock`, {});
+    assert.equal(a.route, "link-dir");
+    await closeServer(a.socket);
+    assert.equal(fs.existsSync(`${dir}/s.sock`), false);
+    const w = world();
+    if (w.cfg.bindFollows === "yes") {
+      const before = linksInB(placeB()).length;
+      const path = `${dir}/${"n".repeat(100)}`;
+      const b = await bindExIn(w, path, {});
+      assert.equal(b.route, "link-file");
+      await closeServer(b.socket);
+      assert.ok(fs.lstatSync(path).isSocket(), "the socket file stays");
+      assert.equal(linksInB(placeB()).length, before, "the E is gone");
+      b.file.remove();
+      assert.equal(fs.existsSync(path), false);
+    }
+  });
+
   // SPEC "カーネルが返すアドレス": the addresses of a long path's listener,
   // of a connection accepted on it and of a socket connected to it can be
   // taken without failing.
