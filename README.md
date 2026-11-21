@@ -125,16 +125,17 @@ The list and why each is wrong are in [SPEC's "Patterns not to use"](https://git
 |---|---|
 | `fs.unlinkSync` / `fs.statSync` of the spelling the kernel gives (a peer's `getpeername` in another language, `lsof`'s output, ...) without looking at `spelling` | keep the path given and use it; `b.file.remove()` |
 | use `f.path` after `cleanup()` or after the process has ended | use a spelling only within its `until` |
-| bind a relative path, `process.chdir`, then `fs.unlinkSync` the relative path | make it absolute with `path.resolve` before the bind; `b.file.remove()` |
+| bind a relative path, `process.chdir`, then `fs.unlinkSync` the relative path (closing a `bindEx` / `listenEx` listener after the `chdir` does the same: the standard library unlinks the relative path against the cwd at the close) | make it absolute by putting the cwd in front before the bind (not `path.resolve`, which folds `..` as a string); `b.file.remove()` |
 | count on `server.close()` / `listener.stop()` to remove the socket file (for a link-file spelling only the symlink goes) | `b.file.remove()`, or remove the path given |
 | count on `b.file.remove()` to close the listener | close the listener yourself |
 | call `b.file.remove()` after `server.close()` | call it before closing |
-| hand a `/proc` spelling, or one whose `usableCrossUid` is false, to a peer of another uid | pass `{ usableCrossUid: true }` and check the resulting `spelling` |
+| hand a `/proc` spelling, or one whose `usableCrossUid` is false, to a peer of another uid | pass `{ usableCrossUid: true }` (where it cannot be met, `ENAMETOOLONG` rather than a spelling they cannot follow) |
 | branch on `route`, `base` or `skipped` | branch on `spelling` |
 
 ```ts
 // bind an absolute path, and remove before closing
-const b = await bindEx(nodePath.resolve(relative));
+// not path.resolve: it makes `a/sym/..` `a`, not the parent of the symlink's target
+const b = await bindEx(relative.startsWith("/") ? relative : `${process.cwd()}/${relative}`);
 try {
   // ...
 } finally {
@@ -142,16 +143,15 @@ try {
   b.socket.close();
 }
 
-// check that a spelling for a peer of another uid was met
+// ask for a spelling a peer of another uid can follow: ENAMETOOLONG where
+// none can be had, and for a long path f.spelling is a Linked one whose
+// usableCrossUid is true
 const f = resolveForBind(path, { usableCrossUid: true });
-if (f.spelling.kind === "Linked" && !f.spelling.usableCrossUid) {
-  throw new Error("no spelling another uid can follow");
-}
 ```
 
 ## How a long path is reached
 
-The standard length is 108 bytes for Node and 107 for Bun on Linux, 103 elsewhere (107 on illumos). A longer path follows SPEC's [routes and their order](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md#routes-for-long-paths-and-their-order).
+The standard length is 107 bytes on Linux and illumos and 103 elsewhere, for Node and Bun alike (`sun_path` less one; Node on Linux also takes 108 bytes without a NUL, which is not handed to it). A longer path follows SPEC's [routes and their order](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md#routes-for-long-paths-and-their-order).
 
 A route that needs native code is not made: it is passed over as unusable and named in `skipped` (reason `no native code in sockat-ts`).
 
@@ -170,13 +170,13 @@ A route that needs native code is not made: it is passed over as unusable and na
 
 The longest file name sockat-ts reaches (bytes) when the directory alone is over the standard length, the bases as the system has them. Without the routes it does not make, some are shorter than in the hub's [reach](https://github.com/kawaz/sockat/blob/main/pages/reach/README.md):
 
-| system | bind (`bind`, `bindEx`, `listen`, `resolveForBind`) | connect (`connect`, `resolveForConnect`) |
-|---|---|---|
-| Linux / Android | about 76 (about 70 through `/proc`) | 255 |
-| macOS | 255 (link-file) | 255 |
-| FreeBSD, OpenBSD | about 72 | 255 |
-| NetBSD | 255 (link-file) | 255 |
-| illumos | none (D cannot be locked) | 255 |
+| system | bind (`bind`, `bindEx`, `listen`, `resolveForBind`) | `connect`, `connectEx` | `resolveForConnect` |
+|---|---|---|---|
+| Linux / Android | about 76 (about 70 through `/proc`) | 255 | 255 |
+| macOS | 255 (link-file) | 255 | 255 |
+| FreeBSD, OpenBSD | about 72 | 255 | 255 |
+| NetBSD | 255 (link-file) | 255 | 255 |
+| illumos | none (D cannot be locked) | 255 (no D) | none (D cannot be locked) |
 
 Where no B can be made (no base can be written to), the routes through B cannot be used, and a connect reaches only what proc-direct and relative reach.
 
@@ -186,7 +186,7 @@ On a Linux where `/proc` is not visible (an empty tmpfs mounted over it, for exa
 
 - What only the routes not made (above) reach is not reached
 - **The listener of `bindEx` / `listenEx` too unlinks its spelling when closed** (SPEC: "the listener of `_ex` removes nothing when closed"; the runtimes give no way to stop it). Call `file.remove()` before closing it
-- When `bindEx` / `listenEx` cannot record the file of a short path, the standard library unlinks the path as the listener is closed, so whatever replaced the socket goes too
+- When `bindEx` / `listenEx` cannot record the file of a short path, the standard library unlinks the path as the listener is closed, so whatever replaced the socket goes too. A short relative path is unlinked against the cwd at the close, so when the cwd changed during the bind and the file could not be recorded, a file of that name where the cwd went may go. A process that changes its cwd makes the path absolute before the bind
 - No DGRAM and no SEQPACKET (the standard libraries of Node and Bun have none)
 - The errors of a short path are the standard library's (Node's listen says `EACCES` for a missing directory); a long path's are SPEC's errno (`ENOENT`)
 

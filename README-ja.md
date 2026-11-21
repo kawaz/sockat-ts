@@ -125,16 +125,17 @@ f.cleanup(); // 要らなくなったら
 |---|---|
 | `spelling` を見ずに、カーネルが返す綴り (他の言語の相手の `getpeername`、`lsof` の出力等) で `fs.unlinkSync` / `fs.statSync` する | 渡したパスを持っておいて使う。`b.file.remove()` |
 | `cleanup()` の後やプロセスが終わった後に `f.path` を使う | 綴りは `until` の間だけ使う |
-| 相対パスで bind し、`process.chdir` の後にその相対パスで `fs.unlinkSync` する | bind の前に `path.resolve` で絶対パスにする。`b.file.remove()` |
+| 相対パスで bind し、`process.chdir` の後にその相対パスで `fs.unlinkSync` する (`bindEx` / `listenEx` の listener を `chdir` の後に閉じるのも同じ。標準が閉じた時点の cwd で相対パスを unlink する) | bind の前に cwd を前に付けて絶対パスにする (`path.resolve` は `..` を字句で畳むので使わない)。`b.file.remove()` |
 | `server.close()` / `listener.stop()` でソケットのファイルが消えると当てにする (link-file の綴りでは symlink だけが消える) | `b.file.remove()` か、渡したパスで消す |
 | `b.file.remove()` で listener も閉じると当てにする | listener は自分で閉じる |
 | `server.close()` の後に `b.file.remove()` を呼ぶ | 閉じる前に呼ぶ |
-| `/proc` を通る綴りや `usableCrossUid` が false の綴りを、別の uid の相手に辿らせる | `{ usableCrossUid: true }` を渡し、結果の `spelling` を確かめる |
+| `/proc` を通る綴りや `usableCrossUid` が false の綴りを、別の uid の相手に辿らせる | `{ usableCrossUid: true }` を渡す (満たせなければ満たさない綴りに落とさず `ENAMETOOLONG`) |
 | `route`・`base`・`skipped` の文字列で分岐する | `spelling` で分岐する |
 
 ```ts
 // 絶対パスで bind し、閉じる前に remove する
-const b = await bindEx(nodePath.resolve(relative));
+// path.resolve は使わない (`a/sym/..` を symlink の先の親でなく `a` にしてしまう)
+const b = await bindEx(relative.startsWith("/") ? relative : `${process.cwd()}/${relative}`);
 try {
   // …
 } finally {
@@ -142,16 +143,14 @@ try {
   b.socket.close();
 }
 
-// 別の uid の相手に辿らせる綴りは、満たせたかを確かめる
+// 別の uid の相手に辿らせる綴りを求める。満たせなければ ENAMETOOLONG で、
+// 長いパスの f.spelling は usableCrossUid が true の Linked
 const f = resolveForBind(path, { usableCrossUid: true });
-if (f.spelling.kind === "Linked" && !f.spelling.usableCrossUid) {
-  throw new Error("no spelling another uid can follow");
-}
 ```
 
 ## 長いパスへの届き方
 
-標準にそのまま渡す長さは、Linux は Node 108・Bun 107 バイト、他は 103 (illumos は 107) バイトまで。それを超えるパスは SPEC の [経路と試す順番](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#長いパスの経路と試す順番) に従う。
+標準にそのまま渡す長さは、Node も Bun も、Linux と illumos は 107 バイト、他は 103 バイトまで (`sun_path` − 1。Linux の Node は NUL の入らない 108 バイトも受け付けるが、渡さない)。それを超えるパスは SPEC の [経路と試す順番](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#長いパスの経路と試す順番) に従う。
 
 native の部品が要る経路は作らず、使えない経路として `skipped` に入れて次へ進む (理由は `no native code in sockat-ts`)。
 
@@ -170,13 +169,13 @@ native の部品が要る経路は作らず、使えない経路として `skipp
 
 ディレクトリが標準に渡す長さを超えるほど深い時に、sockat-ts で届くファイル名の長さ (バイト。置き場は OS の既定)。作らない経路の分、ハブの [届く範囲](https://github.com/kawaz/sockat/blob/main/pages/reach/README-ja.md) より短い所がある:
 
-| OS | bind (`bind`・`bindEx`・`listen`・`resolveForBind`) | connect (`connect`・`resolveForConnect`) |
-|---|---|---|
-| Linux / Android | およそ 76 (`/proc` を通す綴りはおよそ 70) | 255 まで |
-| macOS | 255 まで (link-file) | 255 まで |
-| FreeBSD・OpenBSD | およそ 72 | 255 まで |
-| NetBSD | 255 まで (link-file) | 255 まで |
-| illumos | 届かない (D をロックできない) | 255 まで |
+| OS | bind (`bind`・`bindEx`・`listen`・`resolveForBind`) | `connect`・`connectEx` | `resolveForConnect` |
+|---|---|---|---|
+| Linux / Android | およそ 76 (`/proc` を通す綴りはおよそ 70) | 255 まで | 255 まで |
+| macOS | 255 まで (link-file) | 255 まで | 255 まで |
+| FreeBSD・OpenBSD | およそ 72 | 255 まで | 255 まで |
+| NetBSD | 255 まで (link-file) | 255 まで | 255 まで |
+| illumos | 届かない (D をロックできない) | 255 まで (D を作らない) | 届かない (D をロックできない) |
 
 B を作れない環境 (置き場が全部書けない等) では、B を通る経路が使えず、connect は proc-direct・relative の分だけ届く。
 
@@ -186,7 +185,7 @@ Linux で `/proc` が見えない環境 (空の tmpfs を被せた等) では、
 
 - 作らない経路 (上の表) でしか届かない所に届かない
 - **`bindEx` / `listenEx` の listener も、閉じると綴りを unlink する** (SPEC は「`_ex` の listener は閉じても消さない」。runtime に止める口が無い)。`file.remove()` は閉じる前に呼ぶ
-- `bindEx` / `listenEx` がファイルを覚えられなかった時、短いパスは listener を閉じる時に標準がパスを unlink するので、その間に置き換わった物も消える
+- `bindEx` / `listenEx` がファイルを覚えられなかった時、短いパスは listener を閉じる時に標準がパスを unlink するので、その間に置き換わった物も消える。短い相対パスは閉じた時点の cwd で unlink されるので、bind の間に cwd が変わってファイルを覚えられなかった時は、移った先の同名のファイルが消えうる。cwd を変えるプロセスは、bind の前に絶対パスにする
 - DGRAM と SEQPACKET は無い (Node と Bun の標準に無い)
 - 短いパスのエラーは標準のまま (Node の listen は無いディレクトリに `EACCES` を返す)。長いパスは SPEC の errno (`ENOENT`)
 
