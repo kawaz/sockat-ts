@@ -108,6 +108,10 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+      # dist/ is what the package ships; it is not in the repository.
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: ./node_modules/.bin/tsc -p tsconfig.build.json
       - run: npm install -g npm@latest
       - run: npm publish --access public
 

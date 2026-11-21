@@ -4,9 +4,39 @@
   "description": "Bind and connect Unix domain sockets at paths longer than sun_path (TypeScript; work in progress)",
   "keywords": ["unix-socket", "sun_path", "ENAMETOOLONG", "uds"],
   "homepage": "https://github.com/kawaz/sockat-ts#readme",
-  "repository": { "type": "git", "url": "git+https://github.com/kawaz/sockat-ts.git" },
-  "bugs": { "url": "https://github.com/kawaz/sockat-ts/issues" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kawaz/sockat-ts.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kawaz/sockat-ts/issues"
+  },
   "license": "MIT",
   "author": "Yoshiaki Kawazu (@kawaz)",
-  "files": ["README.md", "README-ja.md", "LICENSE"]
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./bun": {
+      "types": "./dist/bun.d.ts",
+      "default": "./dist/bun.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "README.md", "README-ja.md", "LICENSE"],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.5",
+    "@types/node": "^26.6.6",
+    "oxlint": "^1.94.0",
+    "typescript": "^7.0.2",
+    "valibot": "^1.5.0"
+  }
 }

@@ -10,10 +10,48 @@ permissions:
   contents: read
 
 jobs:
-  # There is no code yet: the job checks that the package packs.
+  # Build, lint and the tests on each runtime. The tests run the .ts sources
+  # directly (Node strips the types from 22.18 on; Bun runs them as they are).
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        runtime:
+          - { name: bun }
+          - { name: node, version: "22" }
+          - { name: node, version: "24" }
+          - { name: node, version: "26" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - if: matrix.runtime.name == 'node'
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.runtime.version }}
+      - run: bun install --frozen-lockfile
+      - name: build
+        run: ./node_modules/.bin/tsc -p tsconfig.build.json
+      - name: lint
+        run: |
+          ./node_modules/.bin/oxlint --deny-warnings
+          ./node_modules/.bin/tsc -p tsconfig.json
+      - name: test (bun)
+        if: matrix.runtime.name == 'bun'
+        run: bun test ./test/
+      - name: test (node)
+        if: matrix.runtime.name == 'node'
+        run: |
+          node --version
+          node --test 'test/**/*.test.ts'
+
+  # The package packs, with what the build puts in dist/.
   pack:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: ./node_modules/.bin/tsc -p tsconfig.build.json
       - run: bun pm pack --dry-run
