@@ -64,7 +64,7 @@ export async function bindExIn(
 ): Promise<Bound<net.Server>> {
   const trace = new Trace();
   try {
-    const before = beforeBind(path, w.cfg.os === "linux" && path.startsWith("\0"));
+    const before = beforeBind(path);
     const { result, socket } = await driveAsync(bindSteps(w, path, options, trace, "listen"), at);
     showPath(socket, path, result.spelt);
     return boundOf(path, before, result, socket, () => socket.close(), trace);

@@ -138,10 +138,11 @@ describe("bind", () => {
   test("a long path not ending with a name, and a NUL, are argument errors that make nothing", async () => {
     const root = deepDir(tempDir());
     const before = listing(placeB());
-    for (const p of [`${root}/`, `${root}/.`, `${root}/..`, "/tmp/a\0b", `${root}/a\0b`]) {
+    for (const p of [`${root}/`, `${root}/.`, `${root}/..`, "/tmp/a\0b", `${root}/a\0b`, `${root}/a\0b/s.sock`]) {
       const e = await rejection(bindEx(p));
       assert.ok(e.error instanceof TypeError, p);
       assert.equal(e["code"], "ERR_INVALID_ARG_VALUE");
+      assert.match(e.error.message, /^The argument 'path'/);
       assert.equal(e["route"], null);
       assert.deepEqual(e["skipped"], []);
     }

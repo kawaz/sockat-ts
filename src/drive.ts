@@ -61,8 +61,10 @@ export interface BeforeBind {
   readonly relative: boolean;
 }
 
-export function beforeBind(path: string, abstract: boolean): BeforeBind {
-  if (abstract) {
+export function beforeBind(path: string): BeforeBind {
+  // A NUL is an abstract name (no file to record) or an argument error,
+  // which the bind's own checks throw.
+  if (path.includes("\0")) {
     return { file: null, cwd: null, relative: false };
   }
   const relative = !path.startsWith("/");

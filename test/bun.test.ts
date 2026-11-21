@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { describe, test } from "node:test";
 import { connect, connectEx, listen, listenEx } from "../src/bun.ts";
-import { listenExIn } from "../src/bun.ts";
+import { listenExIn } from "../src/bunapi.ts";
 import { deepDir, linksInB, placeB, rejection, shortDir, skippedNames, tempDir, thrown, world } from "./helpers.ts";
 
 // @kawaz/sockat/bun runs on Bun only: under Node these tests are skipped.
