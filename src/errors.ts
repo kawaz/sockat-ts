@@ -24,6 +24,13 @@ export class Unusable {
   }
 }
 
+/**
+ * No B of the places 1 to 3 is there or can be made: the order may still
+ * try the socket's directory. The reason names a place whose B of the
+ * default name is taken (SPEC "診断": 占拠), if any was.
+ */
+export class NoBase extends Unusable {}
+
 /** The call an error belongs to: the system call named in it and the caller's path. */
 export interface CallSite {
   readonly syscall: string;

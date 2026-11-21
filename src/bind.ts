@@ -1,4 +1,4 @@
-import { type CallSite, systemError, type Trace, Unusable } from "./errors.ts";
+import { type CallSite, NoBase, systemError, type Trace, Unusable } from "./errors.ts";
 import { lstat, sameId, statId } from "./fsx.ts";
 import { randomLength } from "./names.ts";
 import { byteLength } from "./paths.ts";
@@ -76,14 +76,16 @@ function baseFor(c: BindCall, cross: boolean, fits: Fits): Base | Unusable {
     return c.w.givenBase(c.opts.base, fits, c.site);
   }
   const b = c.w.autoBase(cross, fits);
-  if (!(b instanceof Unusable) || b.reason !== "no base") {
+  if (!(b instanceof NoBase)) {
     return b;
   }
+  // When a place was taken, the reason says so whatever comes next.
+  const taken = b.reason === "no base" ? "" : ` (${b.reason})`;
   if (cross) {
-    return new Unusable("no base others can follow");
+    return new Unusable(`no base others can follow${taken}`);
   }
   if (!fits("sockdir", "")) {
-    return new Unusable("spelling too long");
+    return new Unusable(`spelling too long${taken}`);
   }
   return c.w.sockdirBase(c.dir.real, c.dir.id) ?? b;
 }
@@ -153,6 +155,11 @@ function baseValue(b: Base, viaProc: boolean): string {
 export interface Linked {
   readonly spelling: string;
   readonly link: Link;
+  /**
+   * The E was made by this call (removed when its bind fails); false for
+   * the default bind's shared E made by an earlier call (kept).
+   */
+  readonly fresh: boolean;
   readonly sp: Spelling;
   readonly base: string;
 }
@@ -171,6 +178,7 @@ function throughB(
   rest: string,
   removable: boolean,
   size: (bspell: string, e: string) => number,
+  share: boolean,
 ): Linked | Unusable {
   const w = c.w;
   const max = w.cfg.spellingLength;
@@ -205,27 +213,53 @@ function throughB(
   if (d instanceof Unusable) {
     return d;
   }
-  const link = w.resolveE(b, d, target);
+  const kept = share ? w.sharedE(b, d, target) : null;
+  const link = kept ?? w.resolveE(b, d, target);
   if (link === null) {
     return new Unusable("E not made");
   }
+  const fresh = kept === null;
+  if (share && fresh) {
+    d.shared.set(target, link.name);
+  }
   const spelling = `${spell}/${d.name}/${link.name}${rest}`;
+  const ln: Linked = { spelling, link, fresh, sp: linkedSpelling(b, viaProc, removable), base: baseValue(b, viaProc) };
   if (byteLength(spelling) > max) {
     // A name taken made the E's name longer than estimated.
-    removeLink(link);
+    dropFresh(ln);
     return new Unusable("spelling too long");
   }
-  return { spelling, link, sp: linkedSpelling(b, viaProc, removable), base: baseValue(b, viaProc) };
+  return ln;
+}
+
+/**
+ * Removes the E of ln when this call made it (and forgets it as the shared
+ * one); an E shared from an earlier call stays, for the binds through it.
+ * A failure to remove it is not reported.
+ */
+function dropFresh(ln: Linked): void {
+  if (!ln.fresh) {
+    return;
+  }
+  removeLink(ln.link);
+  for (const [target, name] of ln.link.d.shared) {
+    if (name === ln.link.name) {
+      ln.link.d.shared.delete(target);
+    }
+  }
 }
 
 /**
  * link-dir's spelling <B>/<D>/<E>/<name>, E a symlink to the socket's
  * directory (its real path), B spelt by procB (Linux with /proc, not for
- * usableCrossUid) or its real path, the first that fits.
+ * usableCrossUid) or its real path, the first that fits. share is for the
+ * default bind, which keeps one E per directory in D and goes through it
+ * again (SPEC-routes "link-dir"); the others make an E per call, which their
+ * cleanup removes.
  */
-export function linkDirSpelling(c: BindCall): Linked | Unusable {
+export function linkDirSpelling(c: BindCall, share: boolean): Linked | Unusable {
   const useProc = c.w.cfg.os === "linux" && c.opts.usableCrossUid !== true;
-  return throughB(c, useProc, c.dir.real, `/${c.dir.name}`, true, (bspell, e) => linkDirLen(bspell, e, c.dir.name));
+  return throughB(c, useProc, c.dir.real, `/${c.dir.name}`, true, (bspell, e) => linkDirLen(bspell, e, c.dir.name), share);
 }
 
 /**
@@ -233,7 +267,7 @@ export function linkDirSpelling(c: BindCall): Linked | Unusable {
  * B spelt by procB when useProc (a connect's resolve) or its real path.
  */
 export function linkFileSpelling(c: BindCall, target: string, useProc: boolean): Linked | Unusable {
-  return throughB(c, useProc, target, "", false, linkFileLen);
+  return throughB(c, useProc, target, "", false, linkFileLen, false);
 }
 
 /** The routes of the bind order after standard on this system, with those not made. */
@@ -271,6 +305,7 @@ export function* bindSteps(
   trace: Trace,
   syscall: string,
   spell: StandardSpelling,
+  share: boolean,
 ): Generator<string, BindResult, Outcome> {
   const site: CallSite = { syscall, path };
   const kind = classify(w, path, opts, spell);
@@ -290,7 +325,7 @@ export function* bindSteps(
     let target = "";
     switch (route) {
       case "link-dir":
-        ln = linkDirSpelling(c);
+        ln = linkDirSpelling(c, share);
         break;
       case "link-file": {
         const t = absTarget(path);
@@ -315,8 +350,9 @@ export function* bindSteps(
       trace.route = route;
       return { route, spelling: ln.sp, base: ln.base, link: ln.link, spelt: ln.spelling };
     }
-    // A failure to remove E is not reported: the bind's error is the call's.
-    removeLink(ln.link);
+    // The E this call made goes (a shared one from an earlier call stays); a
+    // failure to remove it is not reported: the bind's error is the call's.
+    dropFresh(ln);
     // Where bind(2) is not known to follow a symlink, a failure with nothing
     // at the path is taken for one that did not follow it (SPEC-routes
     // "link-file"). Where it is known to follow, the failure is real

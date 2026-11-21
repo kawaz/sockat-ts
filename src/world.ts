@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import type { Config } from "./config.ts";
 import { envConfig } from "./config.ts";
-import { type CallSite, systemError, Unusable } from "./errors.ts";
+import { type CallSite, NoBase, systemError, Unusable } from "./errors.ts";
 import {
   attempt,
   closeQuietly,
@@ -38,6 +38,12 @@ export interface ProcD extends HeldDir {
   readonly fd: number;
   readonly name: string;
   readonly id: FileId;
+  /**
+   * The link-dir E the default bind shares, by the real path of the socket's
+   * directory it points to (SPEC-routes "link-dir"): one per directory in
+   * this D, made again with D.
+   */
+  readonly shared: Map<string, string>;
 }
 
 /** A B the world holds, by its fd (never closed). */
@@ -84,7 +90,6 @@ export type Fits = (kind: BaseKind, real: string) => boolean;
 type Made = Result<number> | { readonly ok: false; readonly code: "notOurs" };
 
 const spellingTooLong = new Unusable("spelling too long");
-const noBase = new Unusable("no base");
 
 /** The fd-free key of a (st_dev, st_ino). */
 function key(id: FileId): string {
@@ -207,7 +212,10 @@ export class World {
    * first place in order where B is or can be made, whatever the length of
    * the path, so every process of the user finds its B in the same place.
    * Before B is made there, fits estimates the spelling through it: where it
-   * cannot fit, nothing is made and the next place is not tried.
+   * cannot fit, nothing is made and the next place is not tried. A place
+   * whose B of the default name is there and fails the checks (taken by
+   * someone else) is passed over, nothing made in it (SPEC-routes "B の作り方"
+   * step 5), and named in the reason when no place is left.
    */
   autoBase(cross: boolean, fits: Fits): Base | Unusable {
     this.dropGoneAuto();
@@ -223,6 +231,7 @@ export class World {
         return this.auto;
       }
     }
+    const taken: string[] = [];
     for (const p of this.autoPlaces()) {
       const real = realDir(p.path);
       if (!real.ok || !this.ancestorsPass(real.value)) {
@@ -236,6 +245,9 @@ export class World {
       }
       const made = this.makeBase(p, real.value, false);
       if (!made.ok) {
+        if (made.code === "notOurs") {
+          taken.push(joinUnder(real.value, bName(p.kind)));
+        }
         continue;
       }
       const b = this.known(made.value);
@@ -253,7 +265,7 @@ export class World {
       this.auto = b;
       return b;
     }
-    return noBase;
+    return new NoBase(taken.length === 0 ? "no base" : `no base: ${taken.join(", ")} taken (fails the checks)`);
   }
 
   /**
@@ -433,9 +445,8 @@ export class World {
    * Makes (or opens) B in the place p, whose real path is real (SPEC-routes
    * "B の作り方" steps 2 to 5). B is named sockat-<euid> (sockat under
    * $XDG_RUNTIME_DIR, .sockat.<random> in the socket's directory); one
-   * already there that fails the check is passed over for
-   * sockat-<euid>.<random>, except for Options.base (given), whose failure is
-   * returned.
+   * already there that fails the check is notOurs: the place cannot be used
+   * (Options.base turns it into EPERM).
    */
   private makeBase(p: Place, real: string, given: boolean): Result<Base> | { readonly ok: false; readonly code: "notOurs" } {
     if (!this.ancestorsPass(real)) {
@@ -461,9 +472,6 @@ export class World {
       } else {
         name = bName(p.kind);
         made = makeOrOpen(parent.value, name);
-        if (!made.ok && made.code === "notOurs") {
-          ({ name, made } = this.makeFresh(parent.value, `sockat-${euid()}.`));
-        }
       }
       if (!made.ok) {
         return made;
@@ -614,7 +622,33 @@ export class World {
       closeQuietly(fd);
       return "takenAway";
     }
-    return { fd, name, id, real: joinUnder(b.real, name), at: this.cfg.os === "linux" ? procAt(this.cfg.proc, fd, id) : null };
+    return {
+      fd,
+      name,
+      id,
+      real: joinUnder(b.real, name),
+      at: this.cfg.os === "linux" ? procAt(this.cfg.proc, fd, id) : null,
+      shared: new Map(),
+    };
+  }
+
+  /**
+   * The E the default bind shares in d (b's D) for target, a directory's
+   * real path: the one made before, when its name, read through D's fd
+   * (readlinkat's stand-in, DR-0002), still points to target; otherwise it
+   * is forgotten and null (SPEC-routes "link-dir": made again).
+   */
+  sharedE(b: Base, d: ProcD, target: string): Link | null {
+    const name = d.shared.get(target);
+    if (name === undefined) {
+      return null;
+    }
+    const now = attempt(() => fs.readlinkSync(entry(dHeld(b, d), name)));
+    if (now.ok && now.value === target) {
+      return { base: b, d, name };
+    }
+    d.shared.delete(target);
+    return null;
   }
 
   /**

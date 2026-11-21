@@ -55,7 +55,7 @@ function showPath(server: net.Server, path: string, spelt: string): void {
 }
 
 export async function bindIn(w: World, path: string): Promise<net.Server> {
-  const { result, socket } = await driveAsync(bindSteps(w, path, {}, new Trace(), "listen", forNodeNet), listenAt);
+  const { result, socket } = await driveAsync(bindSteps(w, path, {}, new Trace(), "listen", forNodeNet, true), listenAt);
   showPath(socket, path, result.spelt);
   return socket;
 }
@@ -74,7 +74,7 @@ export async function bindExIn(
   const trace = new Trace();
   try {
     const before = beforeBind(path);
-    const { result, socket } = await driveAsync(bindSteps(w, path, options, trace, "listen", forNodeNet), at);
+    const { result, socket } = await driveAsync(bindSteps(w, path, options, trace, "listen", forNodeNet, false), at);
     showPath(socket, path, result.spelt);
     return boundOf(path, before, result, socket, () => socket.close(), trace);
   } catch (e) {

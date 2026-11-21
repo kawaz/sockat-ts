@@ -41,7 +41,7 @@ export interface Config {
   /** The directories a systemd PrivateTmp replaces (Spelling's usableWithPrivateTmp). */
   readonly privateTmps: readonly string[];
   readonly bindFollows: Follows;
-  /** Random names of D, of the default connect's E and of a B fallen back to. */
+  /** Random names of D, of the default connect's E and of a B in the socket's directory. */
   readonly random: () => string;
   readonly lock: LockMethod;
 }

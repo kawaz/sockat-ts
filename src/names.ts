@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { errnoCode } from "./errors.ts";
 
-// Random names: of D, of the default connect's E, and of a B fallen back to
+// Random names: of D, of the default connect's E, and of a B in the socket's directory
 // (SPEC-routes "D と E").
 
 /** The length of a random name. */

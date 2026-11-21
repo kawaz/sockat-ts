@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { describe, test } from "node:test";
 import { bindEx, connect } from "../src/index.ts";
-import { bindExIn } from "../src/netapi.ts";
+import { bindExIn, bindIn } from "../src/netapi.ts";
+import type { World } from "../src/world.ts";
 import { randomName } from "../src/names.ts";
 import {
   closeServer,
@@ -22,6 +23,26 @@ import {
 } from "./helpers.ts";
 
 const os = world().cfg.os;
+
+/** A fresh place standing in for /tmp (1777, as /tmp is). */
+function freshPlace(): string {
+  const p = shortDir();
+  fs.chmodSync(p, 0o1777);
+  return p;
+}
+
+/** The symlinks in w's D (its path and target), whatever B it is in. */
+function linksOf(w: World): { path: string; target: string }[] {
+  const b = w.auto;
+  if (b === null || b.d === null) {
+    return [];
+  }
+  const d = `${b.real}/${b.d.name}`;
+  return fs
+    .readdirSync(d)
+    .map((n) => ({ path: `${d}/${n}`, target: fs.readlinkSync(`${d}/${n}`) }))
+    .toSorted((x, y) => x.path.localeCompare(y.path));
+}
 
 describe("bind", () => {
   // DR-0003: a path of exactly the standard length goes to the standard as
@@ -357,6 +378,71 @@ describe("bind", () => {
     await closeServer(b.socket);
     const after = b.socket.address();
     assert.ok(after === null || after === path, JSON.stringify(after));
+  });
+
+  // SPEC-routes "link-dir": the default bind keeps one link-dir E per
+  // socket's directory in its D and binds through it again, so repeated and
+  // concurrent default binds into one directory add a single E; bindEx
+  // still makes an E per call, which its cleanup removes.
+  test("default binds into one directory share one link-dir E; bindEx makes its own", async () => {
+    const w = world({ tmp: freshPlace() });
+    const dir = deepDir(tempDir());
+    const servers = await Promise.all(Array.from({ length: 5 }, (_, i) => bindIn(w, `${dir}/s${i}.sock`)));
+    const e = linksOf(w);
+    assert.equal(e.length, 1, JSON.stringify(e));
+    for (let i = 0; i < 5; i++) {
+      assert.ok(fs.lstatSync(`${dir}/s${i}.sock`).isSocket());
+    }
+    const again = await bindIn(w, `${dir}/s5.sock`);
+    assert.deepEqual(linksOf(w), e);
+    const x = await bindExIn(w, `${dir}/x.sock`, {});
+    assert.equal(linksOf(w).length, 2);
+    x.file.remove();
+    assert.deepEqual(linksOf(w), e);
+    for (const s of [...servers, again, x.socket]) {
+      await closeServer(s);
+    }
+  });
+
+  // SPEC-routes "link-dir": a shared E that was removed, or that points
+  // elsewhere now, is found by reading it through D and made again; the
+  // bind goes through.
+  test("a shared E removed or pointing elsewhere is made again", async () => {
+    const w = world({ tmp: freshPlace() });
+    const dir = deepDir(tempDir());
+    const a = await bindIn(w, `${dir}/a.sock`);
+    const [first] = linksOf(w);
+    assert.ok(first !== undefined);
+    fs.unlinkSync(first.path);
+    const b = await bindIn(w, `${dir}/b.sock`);
+    assert.ok(fs.lstatSync(`${dir}/b.sock`).isSocket());
+    const [second] = linksOf(w);
+    assert.ok(second !== undefined && second.path !== first.path);
+    fs.unlinkSync(second.path);
+    fs.symlinkSync(tempDir(), second.path);
+    const c = await bindIn(w, `${dir}/c.sock`);
+    assert.ok(fs.lstatSync(`${dir}/c.sock`).isSocket());
+    assert.equal(linksOf(w).filter((l) => l.target === fs.realpathSync(dir)).length, 1);
+    for (const s of [a, b, c]) {
+      await closeServer(s);
+    }
+  });
+
+  // SPEC "失敗をやり直さない": a default bind that fails (EADDRINUSE) keeps
+  // the shared E an earlier call made (other binds go through it), and
+  // removes an E it made itself.
+  test("a failing default bind keeps the shared E and removes one it made", async () => {
+    const w = world({ tmp: freshPlace() });
+    const dir = deepDir(tempDir());
+    fs.writeFileSync(`${dir}/busy.sock`, "");
+    await rejection(bindIn(w, `${dir}/busy.sock`));
+    assert.deepEqual(linksOf(w), []);
+    const a = await bindIn(w, `${dir}/a.sock`);
+    const e = linksOf(w);
+    const err = await rejection(bindIn(w, `${dir}/busy.sock`));
+    assert.equal(err["code"], "EADDRINUSE");
+    assert.deepEqual(linksOf(w), e);
+    await closeServer(a);
   });
 
   // SPEC "カーネルが返すアドレス": the addresses of a long path's listener,

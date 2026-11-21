@@ -54,7 +54,7 @@ export function requireBun(): void {
 }
 
 export function listenIn<Data>(w: World, options: Bun.UnixSocketOptions<Data>): Bun.UnixSocketListener<Data> {
-  const { result, socket } = driveSync(bindSteps(w, options.unix, {}, new Trace(), "listen", asItIs), listenAt(options));
+  const { result, socket } = driveSync(bindSteps(w, options.unix, {}, new Trace(), "listen", asItIs, true), listenAt(options));
   showPath(socket, options.unix, result.spelt);
   return socket;
 }
@@ -64,7 +64,7 @@ export function listenExIn<Data>(w: World, options: Bun.UnixSocketOptions<Data>,
   const path = options.unix;
   try {
     const before = beforeBind(path);
-    const { result, socket } = driveSync(bindSteps(w, path, sockatOptions, trace, "listen", asItIs), listenAt(options));
+    const { result, socket } = driveSync(bindSteps(w, path, sockatOptions, trace, "listen", asItIs, false), listenAt(options));
     showPath(socket, path, result.spelt);
     return boundOf(path, before, result, socket, () => socket.stop(true), trace);
   } catch (e) {

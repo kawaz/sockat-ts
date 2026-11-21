@@ -49,7 +49,7 @@ export function resolveForBindIn(w: World, path: string, opts: Options, spell: S
     const c = newBindCall(w, path, opts, { syscall: "resolve", path });
     trace.skip("standard", "path too long");
     let route: RouteName = "link-dir";
-    let ln: Linked | Unusable = linkDirSpelling(c);
+    let ln: Linked | Unusable = linkDirSpelling(c, false);
     if (ln instanceof Unusable && w.cfg.bindFollows === "yes") {
       trace.skip(route, ln.reason);
       route = "link-file";

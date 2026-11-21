@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import nodePath from "node:path";
 import { describe, test } from "node:test";
-import { bindExIn } from "../src/netapi.ts";
+import { bindExIn, connectExIn } from "../src/netapi.ts";
 import { resolveForBindIn } from "../src/resolve.ts";
 import { closeServer, deepDir, listing, rejection, shortDir, tempDir, world } from "./helpers.ts";
 
@@ -17,18 +16,36 @@ function freshPlace(): string {
 
 describe("places of B", () => {
   // SPEC-routes "B の作り方" step 5: a sockat-<uid> already there that fails
-  // the check (here: others can write to it) is passed over for
-  // sockat-<uid>.<10 random characters>, made fresh; the one there is left
-  // as it is.
-  test("a B there that fails the check falls back to a random name", () => {
+  // the check (taken: here others can write to it) makes its place
+  // unusable. Nothing is made there (no B of another name), and B goes to
+  // the next place ($TMPDIR here).
+  test("a taken B of the default name passes the place over to the next", async () => {
     const p = freshPlace();
     fs.mkdirSync(`${p}/sockat-${uid}`);
     fs.chmodSync(`${p}/sockat-${uid}`, 0o777);
-    const w = world({ tmp: p });
-    resolveForBindIn(w, `${deepDir(tempDir())}/s.sock`, {}).cleanup();
-    const name = nodePath.basename(w.auto?.real ?? "");
-    assert.match(name, new RegExp(`^sockat-${uid}\\.[A-Za-z0-9]{10}$`));
+    const next = shortDir();
+    fs.chmodSync(next, 0o700);
+    const w = world({ tmp: p, getenv: (n) => (n === "TMPDIR" ? next : undefined) });
+    const b = await bindExIn(w, `${deepDir(tempDir())}/s.sock`, {});
+    assert.equal(w.auto?.kind, "tmpdir");
+    assert.deepEqual(listing(p), [`sockat-${uid}/`]);
+    assert.deepEqual(listing(`${p}/sockat-${uid}`), []);
     assert.equal(fs.statSync(`${p}/sockat-${uid}`).mode & 0o777, 0o777);
+    b.file.remove();
+    await closeServer(b.socket);
+  });
+
+  // SPEC "診断": with the only place taken, the routes through B cannot be
+  // used, and their reason says the B was taken (fails the checks).
+  test("with the only place taken, the reason of the routes through B says so", async () => {
+    const p = freshPlace();
+    fs.mkdirSync(`${p}/sockat-${uid}`);
+    fs.chmodSync(`${p}/sockat-${uid}`, 0o777);
+    const w = world({ tmp: p, proc: "" });
+    const e = await rejection(connectExIn(w, `${deepDir(shortDir())}/s.sock`, {}));
+    assert.equal(e["code"], "ENAMETOOLONG");
+    assert.match(JSON.stringify(e["skipped"]), /sockat-\d+ taken \(fails the checks\)/);
+    assert.deepEqual(listing(p), [`sockat-${uid}/`]);
   });
 
   // SPEC-routes "実体の置き場": a B or D held that was removed (by a hand, an

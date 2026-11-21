@@ -2,12 +2,19 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { describe, test } from "node:test";
 import { connect, connectEx, listen, listenEx } from "../src/bun.ts";
-import { listenExIn } from "../src/bunapi.ts";
+import { listenExIn, listenIn } from "../src/bunapi.ts";
 import { deepDir, linksInB, listing, placeB, rejection, shortDir, skippedNames, tempDir, thrown, world } from "./helpers.ts";
 
 // @kawaz/sockat/bun runs on Bun only: under Node these tests are skipped.
 const onBun = typeof process.versions["bun"] === "string";
 const os = world().cfg.os;
+
+/** A fresh place standing in for /tmp (1777). */
+function shortDirSticky(): string {
+  const p = shortDir();
+  fs.chmodSync(p, 0o1777);
+  return p;
+}
 
 /** Echoing socket handlers for Bun.listen. */
 const echoing = {
@@ -113,6 +120,25 @@ describe("@kawaz/sockat/bun", { skip: !onBun && "Bun only" }, () => {
 });
 
 describe("@kawaz/sockat/bun, more", { skip: !onBun && "Bun only" }, () => {
+  // SPEC-routes "link-dir": Bun's default listen, like the default bind,
+  // shares one link-dir E per socket's directory; listenEx makes its own.
+  test("default listens into one directory share one link-dir E", () => {
+    const w = world({ tmp: shortDirSticky() });
+    const dir = deepDir(tempDir());
+    const ls = [0, 1, 2].map((i) => listenIn(w, { unix: `${dir}/s${i}.sock`, socket: echoing }));
+    const b = w.auto;
+    assert.ok(b !== null && b.d !== null);
+    const d = `${b.real}/${b.d.name}`;
+    assert.equal(fs.readdirSync(d).length, 1);
+    const x = listenExIn(w, { unix: `${dir}/x.sock`, socket: echoing }, {});
+    assert.equal(fs.readdirSync(d).length, 2);
+    x.file.remove();
+    x.socket.stop(true);
+    for (const l of ls) {
+      l.stop(true);
+    }
+  });
+
   // DR-0002: the listener's unix is the path given, after stop() too, as
   // Bun's own listener keeps the path it was given.
   test("a long path's listener's unix is the path, after stop too", () => {
