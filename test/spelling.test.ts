@@ -7,7 +7,8 @@ import { sockaddrLength } from "../src/config.ts";
 import { bindExIn, connectExIn } from "../src/netapi.ts";
 import { resolveForBindIn } from "../src/resolve.ts";
 import { forNodeNet } from "../src/route.ts";
-import { child, closeServer, deepDir, rejection, shortDir, skippedNames, standardListen, tempDir, world } from "./helpers.ts";
+import { bind, bindEx, connect, connectEx, resolveForBind, resolveForConnect } from "../src/index.ts";
+import { type Caught, child, closeServer, deepDir, rejection, shortDir, skippedNames, standardListen, tempDir, thrown, world } from "./helpers.ts";
 
 const BindRemoveOut = v.object({ ok: v.literal(true), route: v.string(), bound: v.array(v.string()), removed: v.array(v.string()) });
 const NumericOut = v.object({
@@ -34,6 +35,12 @@ function symlinkFork(root: string): void {
   fs.mkdirSync(`${root}/a`);
   fs.mkdirSync(`${root}/b/target`, { recursive: true });
   fs.symlinkSync(`${root}/b/target`, `${root}/a/sym`);
+}
+
+/** c is an argument error (SPEC "エラー": 引数の誤り). */
+function isArg(c: Caught): void {
+  assert.ok(c.error instanceof TypeError, c.error.message);
+  assert.equal(c["code"], "ERR_INVALID_ARG_VALUE");
 }
 
 describe("spellings", () => {
@@ -137,13 +144,23 @@ describe("spellings", () => {
     assert.equal(forNodeNet("d/1"), "d/1");
   });
 
-  // SPEC "短いパス": an empty path is an argument error, making nothing.
-  test("an empty path is an argument error", async () => {
-    const e = await rejection(bindExIn(world(), "", {}));
-    assert.ok(e.error instanceof TypeError);
-    assert.equal(e["code"], "ERR_INVALID_ARG_VALUE");
-    const e2 = await rejection(connectExIn(world(), "", {}));
-    assert.ok(e2.error instanceof TypeError);
+  // SPEC "短いパス": an empty path is an argument error in every function,
+  // checked before the standard is handed anything and before the abstract
+  // check (Linux's bind of "" would autobind to an unnamed abstract address).
+  test("an empty path is an argument error in every function", async () => {
+    isArg(await rejection(bind("")));
+    isArg(await rejection(connect("")));
+    isArg(await rejection(bindEx("")));
+    isArg(await rejection(connectEx("")));
+    isArg(thrown(() => resolveForBind("")));
+    isArg(thrown(() => resolveForConnect("")));
+    if (typeof process.versions["bun"] === "string") {
+      const bun = await import("../src/bun.ts");
+      isArg(thrown(() => bun.listen({ unix: "", socket: { data() {} } })));
+      isArg(thrown(() => bun.listenEx({ unix: "", socket: { data() {} } })));
+      isArg(await rejection(bun.connect({ unix: "", socket: { data() {} } })));
+      isArg(await rejection(bun.connectEx({ unix: "", socket: { data() {} } })));
+    }
   });
 
   // SPEC "sockaddr に入る長さ": a route's spelling is at most sun_path less
