@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "package.json"
+  # A version pushed before this workflow existed (or a release that failed
+  # half-way) is released by running it by hand; check-version still refuses a
+  # version that is already tagged.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Release only what passes CI: the whole suite runs here first, in this
+  # workflow, rather than waiting for the CI run of the push (a trusted
+  # publisher is bound to the workflow that publishes).
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  check-version:
+    needs: ci
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.version.outputs.sha }}
+      version: ${{ steps.version.outputs.current }}
+      changed: ${{ steps.version.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install bump-semver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          LATEST=$(gh release list --repo kawaz/bump-semver --limit 1 --json tagName -q '.[0].tagName' | sed 's/^v//')
+          curl -fsSL --retry 5 --retry-delay 2 --max-time 60 \
+            "https://github.com/kawaz/bump-semver/releases/download/v${LATEST}/bump-semver-linux-amd64" \
+            -o /usr/local/bin/bump-semver
+          chmod +x /usr/local/bin/bump-semver
+          bump-semver --version
+
+      - name: Check version change
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          CURRENT_VERSION=$(bump-semver get package.json --no-hint)
+          echo "current=${CURRENT_VERSION}" >> "$GITHUB_OUTPUT"
+
+          # 既存 tag より大きいか検証 (二重リリース防止)
+          set +e
+          LATEST=$(bump-semver vcs get latest-tag --include-prerelease --vcs git 2>/dev/null)
+          LATEST_EXIT=$?
+          set -e
+          if [ "$LATEST_EXIT" -ne 0 ]; then
+            echo "vcs get latest-tag exited ${LATEST_EXIT} (no SemVer tags yet); assuming first release"
+          else
+            set +e
+            bump-semver compare gt "$CURRENT_VERSION" "$LATEST"
+            CMP_EXIT=$?
+            set -e
+            case "$CMP_EXIT" in
+              0) ;;
+              1)
+                echo "changed=false" >> "$GITHUB_OUTPUT"
+                echo "Version v${CURRENT_VERSION} is not greater than latest tag ${LATEST}; skipping release."
+                exit 0
+                ;;
+              *)
+                echo "::error::Unexpected exit code from bump-semver compare: ${CMP_EXIT}"
+                exit 1
+                ;;
+            esac
+          fi
+
+          if gh release view "v${CURRENT_VERSION}" --repo "$REPO" >/dev/null 2>&1; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Version v${CURRENT_VERSION} already released; skipping."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "New version detected: v${CURRENT_VERSION}"
+          fi
+
+  # npm trusted publishing (OIDC): the trusted publisher registered on npm
+  # names this repository, this workflow file (release.yml) and the
+  # environment "npm". npm 11.5.1 or later exchanges the OIDC token itself,
+  # so no token is stored; provenance is attached automatically.
+  publish-npm:
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.check-version.outputs.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@latest
+      - run: npm publish --access public
+
+  # The tag and the GitHub release come after the package is on npm, so a
+  # failed publish leaves no tag behind and can be retried by hand.
+  release:
+    needs: [check-version, publish-npm]
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create release with tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check-version.outputs.version }}
+          COMMIT_SHA: ${{ needs.check-version.outputs.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release create "v${VERSION}" \
+            --repo "$REPO" \
+            --title "v${VERSION}" \
+            --target "$COMMIT_SHA" \
+            --generate-notes
