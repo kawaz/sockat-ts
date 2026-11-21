@@ -16,7 +16,7 @@ import { world } from "./helpers.ts";
 
 const Command = v.variant("op", [
   v.object({ op: v.literal("hold-resolve"), path: v.string() }),
-  v.object({ op: v.literal("connect-ex"), path: v.string(), noProc: v.optional(v.boolean()) }),
+  v.object({ op: v.literal("connect-ex"), path: v.string(), noProc: v.optional(v.boolean()), noPlace: v.optional(v.boolean()) }),
   v.object({
     op: v.literal("connect-ex-chdir"),
     path: v.string(),
@@ -80,7 +80,12 @@ switch (cmd.op) {
   }
   case "connect-ex":
   case "connect-ex-chdir": {
-    const w = world(cmd.noProc === true ? { proc: "" } : {});
+    const noPlace = cmd.op === "connect-ex" && cmd.noPlace === true;
+    const w = world({
+      ...(cmd.noProc === true ? { proc: "" } : {}),
+      // No place for B at all: /tmp, $XDG_RUNTIME_DIR and $TMPDIR are gone.
+      ...(noPlace ? { tmp: "/nonexistent-stt-place" } : {}),
+    });
     const to = cmd.op === "connect-ex-chdir" ? cmd.chdirTo : null;
     const after = cmd.op === "connect-ex-chdir" && cmd.when === "after";
     let connected = false;
@@ -99,7 +104,7 @@ switch (cmd.op) {
       c.socket.destroy();
       print({ ok: true, route: c.route, skipped: c.skipped.map((s) => s.name) });
     } catch (e) {
-      print({ ...failure(e), connected });
+      print({ ...failure(e), connected, skipped: e instanceof Error && "skipped" in e && Array.isArray(e.skipped) ? e.skipped.map((s: unknown) => (typeof s === "object" && s !== null && "name" in s ? s.name : null)) : [] });
     }
     break;
   }

@@ -29,6 +29,12 @@ const ConnectOut = v.union([
   v.object({ ok: v.literal(false), code: v.nullable(v.string()), message: v.string() }),
 ]);
 
+/** What child.ts prints for a connect with no /proc and no place. */
+const NoPlaceOut = v.union([
+  v.object({ ok: v.literal(true), route: v.string(), skipped: v.array(v.string()) }),
+  v.object({ ok: v.literal(false), code: v.nullable(v.string()), message: v.string(), connected: v.boolean(), skipped: v.array(v.nullable(v.string())) }),
+]);
+
 /** What child.ts prints for a connect whose cwd changed. */
 const ChdirOut = v.object({ ok: v.literal(false), code: v.nullable(v.string()), message: v.string(), connected: v.boolean() });
 
@@ -134,6 +140,36 @@ describe("connect", () => {
       await l.close();
     });
   }
+
+  // The hub's no-place-no-proc-connect: no /proc and no place for B, so
+  // only relative can reach (link-file has no B). A relative spelling of
+  // exactly the sockaddr length (107 on Linux, 103 elsewhere; SPEC "sockaddr
+  // に入る長さ") reaches the socket; one byte longer is ENAMETOOLONG, with
+  // relative and link-file skipped.
+  test("with no /proc and no place, relative reaches up to the sockaddr length", async () => {
+    const max = world().cfg.spellingLength;
+    for (const len of [max, max + 1]) {
+      const root = shortDir();
+      const rest = len - "/s.sock".length;
+      const first = Math.floor((rest - 1) / 2);
+      const dir = `${root}/${"a".repeat(first)}/${"b".repeat(rest - 1 - first)}`;
+      fs.mkdirSync(dir, { recursive: true });
+      const b = await bindEx(`${dir}/s.sock`);
+      b.socket.on("connection", (s) => s.on("error", () => {}));
+      const r = await child({ op: "connect-ex", path: `${dir}/s.sock`, noProc: true, noPlace: true }, root);
+      const out = v.parse(NoPlaceOut, r.out);
+      if (len === max) {
+        assert.deepEqual([out.ok, "route" in out ? out.route : null], [true, "relative"], JSON.stringify(out));
+      } else {
+        assert.equal(out.ok, false);
+        assert.equal("code" in out ? out.code : null, "ENAMETOOLONG");
+        assert.ok(out.skipped.includes("relative") && out.skipped.includes("link-file"), JSON.stringify(out));
+      }
+      await r.end();
+      b.file.remove();
+      await closeServer(b.socket);
+    }
+  });
 
   // proc-direct (Linux with /proc): /proc/self/fd/<dir fd>/<name>, no E.
   test("proc-direct connects through /proc/self/fd on Linux", { skip: os !== "linux" && "Linux only" }, async () => {
