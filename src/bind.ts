@@ -34,6 +34,13 @@ export interface BindResult {
   readonly link: Link | null;
   /** The spelling handed to the standard. */
   readonly spelt: string;
+  /**
+   * Where the route made the socket, for SocketFile to record (SPEC
+   * "remove"): link-dir's E points to the socket's directory as a real path,
+   * and the socket is that directory and the file name. null where the path
+   * itself is looked up after the bind (standard, link-file).
+   */
+  readonly madeIn: { readonly dir: string; readonly name: string } | null;
 }
 
 /** One bind, or one resolve, of a long path. */
@@ -338,7 +345,7 @@ export function* bindSteps(
       throw o.error;
     }
     const spelling: Spelling = kind.kind === "short" && !path.startsWith("/") ? { kind: "CwdRelative" } : { kind: "Original" };
-    return { route: "standard", spelling, base: null, link: null, spelt: kind.spelt };
+    return { route: "standard", spelling, base: null, link: null, spelt: kind.spelt, madeIn: null };
   }
   const c = newBindCall(w, path, opts, site);
   trace.skip("standard", "path too long");
@@ -370,7 +377,8 @@ export function* bindSteps(
     const o = yield ln.spelling;
     if (o.ok) {
       trace.route = route;
-      return { route, spelling: ln.sp, base: ln.base, link: ln.link, spelt: ln.spelling };
+      const madeIn = route === "link-dir" ? { dir: c.dir.real, name: c.dir.name } : null;
+      return { route, spelling: ln.sp, base: ln.base, link: ln.link, spelt: ln.spelling, madeIn };
     }
     // The E this call made goes, a failure to remove it not reported (the
     // bind's error is the call's). The default bind's shared E stays, even

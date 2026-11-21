@@ -1,6 +1,7 @@
 import { asError, type Trace, withDiagnostics } from "./errors.ts";
 import type { BindResult } from "./bind.ts";
 import { type FileId, lstatId, realFile, sameId, socketAt } from "./fsx.ts";
+import { joinUnder } from "./paths.ts";
 import type { Outcome } from "./route.ts";
 import { cwdId } from "./route.ts";
 import { Cleaner, RecordedSocketFile } from "./socketfile.ts";
@@ -156,7 +157,12 @@ export function boundOf<S>(
   const cleaner = new Cleaner(result.link, path);
   let recorded: { file: string; id: { dev: bigint; ino: bigint } } | null = null;
   if (before.file) {
-    const file = realFile(path);
+    // link-dir made the socket in the directory its E points to: that is
+    // what is recorded, not the path looked up again (a symlink on the way
+    // may have changed since the route was set up). The others look the
+    // path up now, after the bind.
+    const file: ReturnType<typeof realFile> =
+      result.madeIn !== null ? { ok: true, value: joinUnder(result.madeIn.dir, result.madeIn.name) } : realFile(path);
     let ok = file.ok;
     if (file.ok) {
       const sock = socketAt(file.value);

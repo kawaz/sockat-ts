@@ -4,7 +4,7 @@ import net from "node:net";
 import { describe, test } from "node:test";
 import { bindEx } from "../src/index.ts";
 import { bindExIn, listenAt } from "../src/netapi.ts";
-import { closeServer, deepDir, linksInB, placeB, rejection, shortDir, tempDir, thrown, world } from "./helpers.ts";
+import { closeServer, deepDir, linksInB, placeB, rejection, shortDir, standardListen, tempDir, thrown, world } from "./helpers.ts";
 
 describe("SocketFile", () => {
   // SPEC "remove": the file goes and the listener stays open; a second call
@@ -110,6 +110,34 @@ describe("SocketFile, more", () => {
     assert.match(e.error.message, /what is at the path left/);
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(fs.readFileSync(path, "utf8"), "precious");
+  });
+
+  // SPEC "remove": link-dir records where the route made the socket (the
+  // directory its E points to), not the path looked up again. A symlink on
+  // the way changed right after the bind leaves the record on the socket
+  // bound: remove() takes it, and the socket where the symlink now leads
+  // (another's) stays.
+  test("bindEx by link-dir records where it made the socket, whatever the path leads to after", async () => {
+    const top = deepDir(tempDir(), 110);
+    fs.mkdirSync(`${top}/a`);
+    fs.mkdirSync(`${top}/b`);
+    fs.symlinkSync(`${top}/a`, `${top}/sym`);
+    const short = `${shortDir()}/other.sock`;
+    const other = await standardListen(short);
+    const b = await bindExIn(world(), `${top}/sym/s.sock`, {}, async (spelling) => {
+      const a = await listenAt(spelling);
+      fs.unlinkSync(`${top}/sym`);
+      fs.symlinkSync(`${top}/b`, `${top}/sym`);
+      fs.renameSync(short, `${top}/b/s.sock`);
+      return a;
+    });
+    assert.equal(b.route, "link-dir");
+    assert.ok(fs.lstatSync(`${top}/a/s.sock`).isSocket());
+    b.file.remove();
+    assert.equal(fs.existsSync(`${top}/a/s.sock`), false, "the socket bound goes");
+    assert.ok(fs.lstatSync(`${top}/b/s.sock`).isSocket(), "the other socket stays");
+    await closeServer(b.socket);
+    await closeServer(other);
   });
 
   // DR-0004: a short absolute path goes to the standard as it is, whose
