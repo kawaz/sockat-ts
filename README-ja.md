@@ -7,7 +7,19 @@
 - 振る舞いの正本 (言語によらない仕様): [kawaz/sockat の SPEC](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md)
 - 他の言語の実装: [kawaz/sockat](https://github.com/kawaz/sockat)
 
+言語によらない説明はハブにある。この README は TypeScript での名前と形、sockat-ts に固有の注意だけを書く。
+
+- [長いパスで標準と違う点](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#長いパスで標準と違う点) (カーネルが返すアドレス、listener を閉じた時、`PrivateTmp` の相手 等)
+- [使ってはいけない書き方](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#使ってはいけない書き方)
+- [置き場に残る物](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#置き場に残る物) と [`sweep`](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#sweep)
+- [Q&A](https://github.com/kawaz/sockat/blob/main/pages/faq-ja.md) (長命の daemon、試験を繰り返す環境、`PrivateTmp` 等)
+
 ## 使い方
+
+```sh
+npm install @kawaz/sockat
+bun add @kawaz/sockat
+```
 
 node:net (Node と Bun):
 
@@ -50,30 +62,23 @@ b.file.remove(); // ソケットのファイルを消す (listener は閉じな�
 b.socket.close();
 ```
 
-- `b.file` は bind した直後にソケットのファイルの realpath と `(st_dev, st_ino)` を覚え、`remove()` はそのパスが今も同じファイルの時だけ消す。覚えられなければ `bindEx` はエラーにする (綴りの symlink を先に消してから listener を閉じるので、置き換わった物は消さない。短いパスは閉じると標準がパスを unlink する)
-- 最後の要素が symlink の時 (macOS・NetBSD の bind はそれを辿る) は、辿った先のソケットを覚えて消し、symlink は消さない
-- `remove()` は `cleanup()` もする。`cleanup()` は綴りが通る symlink (E) だけを消す。成功した後の呼び出しは何もせず、失敗した後の呼び出しはやり直す
-- 開いている間だけ置き換えを見分けられる。閉じた後に作り直された物は `(st_dev, st_ino)` を使い回すファイルシステムで見分けられない
+`file.remove()` と `file.cleanup()` の約束は [SPEC の「片付け」](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#片付け)。sockat-ts に固有の点:
+
+- ファイルを覚えられない時、`bindEx` は綴りの symlink を先に消してから listener を閉じてエラーにする (置き換わった物は消さない)。短いパスは、閉じる時に標準がパスを unlink する
+- `bindEx` / `listenEx` の listener も、閉じると綴りを unlink する ([SPEC から外れる点](#spec-から外れる点))。`remove()` は閉じる前に呼ぶ
 
 ### 綴りの性質 (`Spelling`)
 
-長いパスでは、カーネルが覚えるアドレス (他の言語の相手の `getpeername`、`ss -x`・`lsof` 等) は渡したパスでなく bind の綴りになる。`spelling` はその綴りを後で使えるかを返す。分岐はこれで書く。
+意味は [SPEC の「綴りの性質」](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#綴りの性質-spelling)。TypeScript では `kind` で分ける判別共用体。
 
 | `kind` | 綴り |
 |---|---|
-| `Original` | 元の絶対パス (abstract の名前も) |
-| `CwdRelative` | 元の相対パス (`./` を付けた物も)。cwd を変えると別の所を指す |
-| `Linked` | 置き場の B・D・E を通り、元のパスと同じ所を指す |
-| `Dangling` | どこにも届かない (sockat-ts では生まれない) |
+| `"Original"` | 元の絶対パス (abstract の名前も) |
+| `"CwdRelative"` | 元の相対パス (`./` を付けた物も) |
+| `"Linked"` | 置き場の B・D・E を通り、元のパスと同じ所を指す |
+| `"Dangling"` | どこにも届かない (sockat-ts では生まれない) |
 
-`Linked` の属性:
-
-| 属性 | 意味 |
-|---|---|
-| `removable` | 綴りで unlink すると実体が消えるか。link-dir は true、link-file は false (symlink だけが消える) |
-| `until` | `Process` (`/proc/<pid>/fd/…` を通る綴り: プロセスが終われば辿れない)、`Cleanup` (B の実パスの綴り: `cleanup()` まで) |
-| `usableCrossUid` | 別の uid の相手が辿れるか |
-| `usableWithPrivateTmp` | 自分か相手が `/tmp` を隔離していても (systemd の `PrivateTmp` 等) 辿れるか。`/proc` を通る綴りは true、`/tmp`・`/var/tmp` を通る綴りは false |
+`"Linked"` の属性は `removable`・`until` (`"Process"` / `"Cleanup"`)・`usableCrossUid`・`usableWithPrivateTmp`。
 
 listener の `address()` (node:net) と `unix` (`Bun.listen`) は綴りでなく渡したパスを返す。
 
@@ -81,8 +86,10 @@ listener の `address()` (node:net) と `unix` (`Bun.listen`) は綴りでなく
 
 | 項目 | 意味 |
 |---|---|
-| `usableCrossUid` | 別の uid の相手も辿れる綴りを求める (bind 系だけが見る)。満たせなければ満たさない綴りに落とさず、他の経路へ進む (sockat-ts では `ENAMETOOLONG` になりうる) |
-| `base` | B そのもののパス (アプリが管理する場所。例 `/tmp/app-1000/sockat`)。確かめに外れたらエラーで、自動の置き場に落とさない。B は sockat 専用で、中に他の物を置かない |
+| `usableCrossUid` | 別の uid の相手も辿れる綴りを求める (bind 系だけが見る)。sockat-ts は thread-cwd を作らないので、満たせなければ `ENAMETOOLONG` |
+| `base` | B そのもののパス (アプリが管理する場所。例 `/tmp/app-1000/sockat`)。`sweepBase(base)` で死んだ D を片付ける |
+
+意味は [SPEC の「`Options`」](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#options)。
 
 ### resolve
 
@@ -103,38 +110,27 @@ const socket = net.connect({ path: f.path }); // 何度でも
 f.cleanup(); // 要らなくなったら
 ```
 
-### 置き場に残る物と `sweep`
+### 置き場の片付け
 
-長いパスの綴りは、利用者ごとの置き場 B の中の、プロセスごとのディレクトリ D と symlink E を通る。**B・D・E はアプリの置き場の外に増える。**
+何が残り、いつ消えるかは [SPEC の「置き場に残る物」](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#置き場に残る物)。TypeScript での形:
 
-| | B | D | E |
-|---|---|---|---|
-| 場所 | `/tmp/sockat-<uid>` → `$XDG_RUNTIME_DIR/sockat` → `$TMPDIR/sockat-<uid>` → ソケットのディレクトリの `.sockat.<乱数>` の順で最初に作れた所。`options.base` を渡せばそこ | B の中の乱数 10 文字 | resolve と bind の E は D の中。既定の connect の E は B の直下で、connect の後すぐ消す |
-| 生きている間 | 消さない | プロセスが共有ロックを掛けて持ち続ける | `cleanup()` まで残る |
-| 片付け | sockat はしない | 死んだプロセスの D は OS の一時ディレクトリの掃除で消える。`sweep()` を呼んだ時だけ、ロックの外れた D を消す | `cleanup()` / `remove()` |
-
-- `/tmp/sockat-<uid>` 等の中は、プロセスごとの D (乱数 10 文字) と、その中の綴り用の symlink だけ。生きている D を消しても、綴りが辿れなくなるだけで無関係なファイルには当たらない
-- 既定の `bind` / `listen` は `file` を返さないので、E はプロセスが終わるまで残る。**長いパスに何度も bind する長命のプロセス (セッションごとにソケットを作る daemon 等) は `bindEx` を使い、要らなくなったら `remove()` か `cleanup()` で片付ける**
-- **試験を繰り返す環境 (CI 等) では `sweep()` を呼ぶ**と死んだ D が溜まらない。`sweepBase(base)` は `options.base` の B の分。どちらも自動では呼ばれない
-- **ソケットのディレクトリの B (`.sockat.<乱数>`) と、確かめに外れて落とした B (`sockat-<uid>.<乱数>`) は、`sweep` でも OS の掃除でも消えずに残りうる**
-- **生きている D が消されうる環境**: systemd v242 より古い Linux (RHEL 8 等。`/tmp` の D を 10 日で消す) と、B が macOS の `$TMPDIR` にある時 (dirhelper が 3 日で消しうる)。綴りが辿れなくなるだけ
-- **`PrivateTmp` の相手**: 相手の `/tmp` が隔離されていると、`/tmp` を通る綴りを相手は辿れない。辿れるかは `usableWithPrivateTmp` で分かる
-- **片付けた後の綴りは使わない**。`/tmp` の B は消えた後に他人が同じ名前で作り直しうる
+- 既定の `bind` / `listen` は `file` を返さない。長いパスに何度も bind する長命のプロセスは `bindEx` / `listenEx` を使い、`file.remove()` か `file.cleanup()` で片付ける
+- 試験を繰り返す環境では `sweep()` を、`options.base` の B は `sweepBase(base)` を呼ぶ ([SPEC の「`sweep`」](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#sweep))
 
 ## 使ってはいけない書き方
 
-無関係なファイルを消したり、消し損ねたりする書き方 ([SPEC の「使ってはいけない書き方」](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#使ってはいけない書き方))。避け方のコードは [test/readme.test.ts](./test/readme.test.ts) で動かしている。
+一覧となぜいけないかは [SPEC の「使ってはいけない書き方」](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#使ってはいけない書き方)。TypeScript での形と避け方 (下のコードは [test/readme.test.ts](./test/readme.test.ts) で動かしている):
 
-| 書き方 | なぜいけないか | 代わりに |
-|---|---|---|
-| `spelling` を見ずに、カーネルが返す綴りでソケットのファイルを `fs.unlinkSync` / `fs.statSync` する (他の言語の相手の `getpeername`、`lsof` の出力等) | link-file の綴りでは symlink が消えるだけでファイルは残る | 渡したパスを持っておいて使う。`b.file.remove()` |
-| `cleanup()` の後やプロセスが終わった後に、古い綴り (`f.path`) を使う | 片付けた後の `/tmp` の B は他人が作り直しうる。`until: "Process"` の綴りはプロセスが終われば辿れない | 綴りは `until` の間だけ使う |
-| 相対パスで bind し、`process.chdir` の後にその相対パスで `fs.unlinkSync` する | 別の場所のファイルに当たる (`CwdRelative`) | bind の前に `path.resolve` で絶対パスにする。`b.file.remove()` |
-| `server.close()` / `listener.stop()` だけでソケットのファイルが消えると当てにする | 閉じると綴りを unlink するので、link-file の綴りでは symlink だけが消えてファイルは残る | `b.file.remove()` か、渡したパスで消す |
-| `b.file.remove()` で listener も閉じると当てにする | `remove()` はファイルを消すだけ | listener は自分で閉じる |
-| `server.close()` の後に `b.file.remove()` を呼ぶ | 閉じた後に作り直された別のファイルを見分けられないことがある | 閉じる前に呼ぶ |
-| `/proc` を通る綴りや `usableCrossUid` が false の綴りを、別の uid の相手に辿らせる | 辿れない | `{ usableCrossUid: true }` を渡し、結果の `spelling` を確かめる |
-| `route`・`base`・`skipped` の文字列で分岐する | 診断用で中身を約束しない | `spelling` で分岐する |
+| TypeScript での形 | 代わりに |
+|---|---|
+| `spelling` を見ずに、カーネルが返す綴り (他の言語の相手の `getpeername`、`lsof` の出力等) で `fs.unlinkSync` / `fs.statSync` する | 渡したパスを持っておいて使う。`b.file.remove()` |
+| `cleanup()` の後やプロセスが終わった後に `f.path` を使う | 綴りは `until` の間だけ使う |
+| 相対パスで bind し、`process.chdir` の後にその相対パスで `fs.unlinkSync` する | bind の前に `path.resolve` で絶対パスにする。`b.file.remove()` |
+| `server.close()` / `listener.stop()` でソケットのファイルが消えると当てにする (link-file の綴りでは symlink だけが消える) | `b.file.remove()` か、渡したパスで消す |
+| `b.file.remove()` で listener も閉じると当てにする | listener は自分で閉じる |
+| `server.close()` の後に `b.file.remove()` を呼ぶ | 閉じる前に呼ぶ |
+| `/proc` を通る綴りや `usableCrossUid` が false の綴りを、別の uid の相手に辿らせる | `{ usableCrossUid: true }` を渡し、結果の `spelling` を確かめる |
+| `route`・`base`・`skipped` の文字列で分岐する | `spelling` で分岐する |
 
 ```ts
 // 絶対パスで bind し、閉じる前に remove する
@@ -155,7 +151,7 @@ if (f.spelling.kind === "Linked" && !f.spelling.usableCrossUid) {
 
 ## 長いパスへの届き方
 
-標準にそのまま渡す長さは、Linux は Node 108・Bun 107 バイト、他は 103 (illumos は 107) バイトまで。それを超えるパスは、まずソケットのディレクトリを引き (無ければ `ENOENT`、ディレクトリでなければ `ENOTDIR`。`..` や `.` は文字列で畳まず OS に引かせる)、次の経路を左から試す。経路が実際に bind / connect して失敗したら、そのエラーを返して次を試さない。
+標準にそのまま渡す長さは、Linux は Node 108・Bun 107 バイト、他は 103 (illumos は 107) バイトまで。それを超えるパスは SPEC の [経路と試す順番](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#長いパスの経路と試す順番) に従う。
 
 native の部品が要る経路は作らず、使えない経路として `skipped` に入れて次へ進む (理由は `no native code in sockat-ts`)。
 
@@ -167,15 +163,12 @@ native の部品が要る経路は作らず、使えない経路として `skipp
 | NetBSD | link-dir → link-file | relative → link-file |
 | OpenBSD・illumos | link-dir | relative → link-file |
 
-- **link-dir**: D の中にソケットのディレクトリを指す E を作り、`B/D/E/<ファイル名>` で bind する。`removable`
-- **link-file**: D の中にソケットのファイルを指す E を作り、`B/D/E` で bind する (bind が symlink を辿る OS だけ)。既定の connect は B の直下の E を通し、connect の後すぐ消す。ファイル名の長さによらず届く
-- **proc-direct**: `/proc/self/fd/<ディレクトリの fd>/<ファイル名>` で connect する
-- **relative**: cwd からの相対パスで connect する (cwd は変えない)
+- 経路の中身は [SPEC の「経路の名前」](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#経路の名前)
 - D のロック: macOS と BSD は `O_SHLOCK` で開く、Linux は `flock(1)` (util-linux / busybox) に fd を継がせる。**Linux で `flock(1)` が無いと、長いパスの bind と resolve は `ENAMETOOLONG`** (既定の connect は届く)。illumos はロックの手段が無く同じ
 
 ### どこから届かなくなるか
 
-ディレクトリが標準に渡す長さを超えるほど深い時に、届くファイル名の長さ (バイト。置き場は OS の既定):
+ディレクトリが標準に渡す長さを超えるほど深い時に、sockat-ts で届くファイル名の長さ (バイト。置き場は OS の既定)。作らない経路の分、ハブの [届く範囲](https://github.com/kawaz/sockat/blob/main/pages/reach/README-ja.md) より短い所がある:
 
 | OS | bind (`bind`・`bindEx`・`listen`・`resolveForBind`) | connect (`connect`・`resolveForConnect`) |
 |---|---|---|
