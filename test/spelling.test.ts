@@ -110,21 +110,25 @@ describe("spellings", () => {
     await new Promise<void>((resolve) => tcp.close(() => resolve()));
   });
 
-  // A short relative path node:net would read as a port ("0") binds and
-  // connects as a path in the cwd, its spelling still CwdRelative and its
-  // address() the path given; one whose "./" spelling is over the standard
-  // length takes the routes (and binds where link-file reaches any file name
-  // length, macOS; elsewhere no spelling through B fits so long a name). @kawaz/sockat/bun hands Bun `unix`, which Bun
-  // reads as a path whatever it is.
+  // A short relative path node:net would read as a port ("0") binds as its
+  // absolute candidate (DR-0019), which node:net reads as a path; its
+  // address() is that candidate, and the connect (which leaves a relative
+  // path as it is) goes through "./0". One whose "./" spelling is over the
+  // standard length takes the routes (and binds where link-file reaches any
+  // file name length, macOS; elsewhere no spelling through B fits so long a
+  // name). @kawaz/sockat/bun hands Bun `unix`, which Bun reads as a path
+  // whatever it is.
   test("a short relative path read as a number binds and connects as a path", async () => {
     const dir = shortDir();
+    const want = `${fs.realpathSync(dir)}/0`;
     const long = "1".repeat(world().cfg.standardLength);
     const r = await child({ op: "numeric", name: "0", long }, dir);
     const out = v.parse(NumericOut, r.out);
     assert.equal(out.route, "standard");
-    assert.equal(out.spelling, "CwdRelative");
-    assert.equal(out.address, "0");
+    assert.equal(out.spelling, "Original");
+    assert.equal(out.address, want);
     assert.equal(out.file, "socket");
+    assert.equal(out.connectRoute, "standard");
     assert.equal(out.got, "unix");
     assert.equal(out.longSkipped[0], "standard", "the long one took the routes");
     if (world().cfg.bindFollows === "yes") {
@@ -134,6 +138,22 @@ describe("spellings", () => {
       assert.equal(out.longRoute, null);
       assert.equal(out.longFile, "-");
     }
+    if (typeof process.versions["bun"] === "string") {
+      assert.deepEqual([out.bunUnix, out.bunFile, out.bunGot], [want, "socket", "bun"]);
+    }
+    await r.end();
+  });
+
+  // The same name handed to the standard as it is (no route can be used:
+  // no place, no /proc, and a deep cwd so no candidate fits): node:net is
+  // handed "./0", so it binds the path, not a TCP port; CwdRelative, and
+  // address() the name given.
+  test("a relative path read as a number, handed to the standard as it is, binds as a path", async () => {
+    const dir = deepDir(tempDir());
+    const r = await child({ op: "numeric", name: "0", long: "1".repeat(world().cfg.standardLength), bare: true }, dir);
+    const out = v.parse(NumericOut, r.out);
+    assert.deepEqual([out.route, out.spelling, out.address, out.file, out.got], ["standard", "CwdRelative", "0", "socket", "unix"]);
+    assert.equal(out.longRoute, null);
     if (typeof process.versions["bun"] === "string") {
       assert.deepEqual([out.bunUnix, out.bunFile, out.bunGot], ["0", "socket", "bun"]);
     }

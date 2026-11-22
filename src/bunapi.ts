@@ -38,14 +38,15 @@ function connectAt<Data>(options: Bun.UnixSocketOptions<Data>): (spelling: strin
 }
 
 /**
- * The listener's `unix` is the caller's path, not the spelling the kernel
- * keeps (DR-0002), when they differ. Bun's own listener keeps returning the
- * path it was given after stop(), and so does this one. Bun's stop() still
- * unlinks the spelling.
+ * The listener's `unix` is shown (the path given when absolute, the
+ * absolute form of a relative one; SPEC "相対パスを絶対パスにする"), not the
+ * spelling the kernel keeps (DR-0002), when they differ. Bun's own listener
+ * keeps returning the path it was given after stop(), and so does this one.
+ * Bun's stop() still unlinks the spelling.
  */
-function showPath<Data>(listener: Bun.UnixSocketListener<Data>, path: string, spelt: string): void {
-  if (spelt !== path) {
-    Object.defineProperty(listener, "unix", { value: path, configurable: true, enumerable: true });
+function showPath<Data>(listener: Bun.UnixSocketListener<Data>, shown: string, spelt: string): void {
+  if (spelt !== shown) {
+    Object.defineProperty(listener, "unix", { value: shown, configurable: true, enumerable: true });
   }
 }
 
@@ -61,7 +62,7 @@ export function requireBun(): void {
 
 export function listenIn<Data>(w: World, options: Bun.UnixSocketOptions<Data>): Bun.UnixSocketListener<Data> {
   const { result, socket } = driveSync(bindSteps(w, options.unix, {}, new Trace(), "listen", asItIs, true), listenAt(options));
-  showPath(socket, options.unix, result.spelt);
+  showPath(socket, result.shown, result.spelt);
   return socket;
 }
 
@@ -71,7 +72,7 @@ export function listenExIn<Data>(w: World, options: Bun.UnixSocketOptions<Data>,
   try {
     const before = beforeBind(path);
     const { result, socket, bindCwd } = driveSync(bindSteps(w, path, sockatOptions, trace, "listen", asItIs, false), listenAt(options));
-    showPath(socket, path, result.spelt);
+    showPath(socket, result.shown, result.spelt);
     return boundOf(path, before, result, socket, bindCwd, { close: () => socket.stop(true), unref: () => socket.unref() }, trace);
   } catch (e) {
     throw diagnosed(e, trace);

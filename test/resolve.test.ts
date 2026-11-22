@@ -24,14 +24,13 @@ function connectTo(path: string): Promise<net.Socket> {
 }
 
 describe("resolve", () => {
-  // A path the standard takes is spelt as it is: Original for an absolute
-  // path, CwdRelative for a relative one, with no E to clean up.
-  test("a short path is its own spelling", () => {
+  // A short absolute path is spelt as it is (Original), with no E to clean
+  // up. (A relative path: absolute.test.ts.)
+  test("a short absolute path is its own spelling", () => {
     const f = resolveForBind("/tmp/stt-short.sock");
     assert.equal(f.path, "/tmp/stt-short.sock");
     assert.deepEqual(f.spelling, { kind: "Original" });
     assert.equal(f.route, "standard");
-    assert.deepEqual(resolveForBind("rel.sock").spelling, { kind: "CwdRelative" });
     f.cleanup();
     assert.equal(resolveForConnect("/tmp/stt-short.sock").path, "/tmp/stt-short.sock");
   });

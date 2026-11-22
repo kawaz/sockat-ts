@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import nodePath from "node:path";
 import { describe, test } from "node:test";
 import * as v from "valibot";
@@ -21,18 +22,32 @@ const Output = v.object({
   skipped: v.array(v.string()),
 });
 
-function run(input: string, cwd: string): { status: number | null; out: string } {
-  const r = spawnSync(runtime, [cli], { input, cwd, encoding: "utf8" });
+/** A bind request, with a base of the test's own should a route be taken. */
+function bind(path: string): string {
+  return JSON.stringify({ op: "bind", path, base: `${shortDir()}/b` });
+}
+
+function run(input: string, cwd: string, pwd?: string): { status: number | null; out: string } {
+  const r = spawnSync(runtime, [cli], { input, cwd, encoding: "utf8", env: { ...process.env, PWD: pwd ?? cwd } });
   return { status: r.status, out: r.stdout };
 }
 
 describe("conformance CLI", () => {
-  // A relative short path binds in the cwd the CLI was started in.
-  test("a short relative bind is CwdRelative through the standard", () => {
-    const r = run('{"op":"bind","path":"s.sock"}', shortDir());
-    assert.equal(r.status, 0);
-    const out = v.parse(Output, JSON.parse(r.out));
-    assert.deepEqual([out.ok, out.route, out.spelling?.kind, out.skipped], [true, "standard", "CwdRelative", []]);
+  // A relative short path binds in the cwd the CLI was started in, made
+  // absolute (DR-0019): through the standard, Original. The hub's scenes
+  // start the CLI in a cwd through a symlink and with a $PWD of their own:
+  // the CLI reads $PWD from its environment, so a short symlink to a long
+  // directory (whose real path does not fit) binds through $PWD, and a
+  // $PWD that is not the cwd does not (the routes).
+  test("a short relative bind is made absolute, by $PWD when it names the cwd", () => {
+    const plain = v.parse(Output, JSON.parse(run(bind("s.sock"), shortDir()).out));
+    assert.deepEqual([plain.ok, plain.route, plain.spelling?.kind, plain.skipped], [true, "standard", "Original", []]);
+    const link = `${shortDir()}/l`;
+    fs.symlinkSync(deepDir(tempDir()), link);
+    const viaPwd = v.parse(Output, JSON.parse(run(bind("s.sock"), link).out));
+    assert.deepEqual([viaPwd.ok, viaPwd.route, viaPwd.spelling?.kind, viaPwd.skipped], [true, "standard", "Original", []]);
+    const stale = v.parse(Output, JSON.parse(run(bind("t.sock"), link, shortDir()).out));
+    assert.deepEqual([stale.ok, stale.route, stale.spelling?.kind, stale.skipped[0]], [true, "link-dir", "Linked", "standard"]);
   });
 
   // A long path with a base binds through it ("given"), and the argument

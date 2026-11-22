@@ -15,6 +15,7 @@ Status は各 DR ファイルの `Status:` 行が正本。状態は絵文字と�
 | [DR-0001](DR-0001-public-api-shape.md) | ✅ 実装済 | 公開 API は node:net の型を返す Promise の関数を主にし、Bun の `Bun.listen` / `Bun.connect` の形は `@kawaz/sockat/bun` に置く |
 | [DR-0002](DR-0002-native-free-routes.md) | ✅ 実装済 | native の部品を持たず JS だけで作れる経路だけを作る。D のロックは O_SHLOCK (BSD 系) と flock(1) に fd を継がせる形 (Linux)。listener は閉じると綴りで消す |
 | [DR-0003](DR-0003-standard-length-per-runtime.md) | ✅ 実装済 | 標準に渡す長さは、runtime の標準が綴りを変えずに広げない sockaddr へ入れる最長で、sockaddr に入る長さ (`sun_path` − 1: Linux・illumos 107、他 103) を超えない |
-| [DR-0004](DR-0004-close-relative-listener-only-when-ours.md) | ✅ 実装済 | bindEx が短いパスのファイルを覚えられなかった時 (相対パスの cwd の変化、絶対パスの置き換え) は、閉じると自分のソケットだけを消せる時にだけ閉じ、それ以外は unref して手放す |
+| [DR-0004](DR-0004-close-relative-listener-only-when-ours.md) | ✅ 実装済 | bindEx が標準に渡した綴りのファイルを覚えられなかった時 (相対のまま渡した綴りの cwd の変化、絶対の綴りの置き換え) は、閉じると自分のソケットだけを消せる時にだけ閉じ、それ以外は unref して手放す |
+| [DR-0005](DR-0005-absolutize-relative-path-details.md) | ✅ 実装済 | 相対パスを絶対パスにする (ハブの DR-0019) の TypeScript での細部: `$PWD` は `Config.getenv` で読む、長さのせいで使えない実パス (Linux glibc の長い実パスを含む) は手順 5、`..` を畳むのは `$PWD` の候補だけ、アドレスを返す口 |
 
 言語によらない振る舞いの正本は [ハブの SPEC](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md)。

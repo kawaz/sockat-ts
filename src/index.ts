@@ -1,9 +1,11 @@
 /**
  * sockat: bind and connect Unix domain sockets at paths longer than
- * sun_path, with node:net (Node and Bun). A path the standard takes as it is
- * goes to it unchanged; a longer one is spelt shorter through a directory
- * this user's processes share, or relative to the socket's directory, and
- * that spelling goes to the standard.
+ * sun_path, with node:net (Node and Bun). An absolute path the standard
+ * takes as it is goes to it unchanged; a longer one is spelt shorter (its
+ * real path, or through a directory this user's processes share, or
+ * relative to the socket's directory), and that spelling goes to the
+ * standard. The binds and the resolves make a relative path absolute
+ * first, so that the spelling the kernel keeps does not depend on the cwd.
  *
  * The behaviour is the language-independent specification's:
  * https://github.com/kawaz/sockat/blob/main/docs/SPEC.md
@@ -23,11 +25,16 @@ export type { RouteDiagnostics, SystemError } from "./errors.ts";
 
 /**
  * Binds and listens at path, as `net.createServer().listen(path)` does,
- * and resolves once it is listening. A path the standard takes (at most
- * sun_path less one byte: 107 on Linux, 103 on macOS) goes to it as it is.
+ * and resolves once it is listening. An absolute path the standard takes
+ * (at most sun_path less one byte: 107 on Linux, 103 on macOS) goes to it
+ * as it is. A relative path is made absolute first (the same place, an
+ * absolute spelling): handed to the standard when that fits, otherwise
+ * spelt like a long path; only when nothing else can be used, as it is.
  *
- * The listener's `address()` returns `path`. Closing it unlinks the spelling
- * the kernel keeps: for a long path through a symlink to the socket file
+ * The listener's `address()` returns `path` when it is absolute, and the
+ * absolute form of a relative one (the relative path itself only when it
+ * was handed to the standard as it is). Closing it unlinks the spelling the
+ * kernel keeps: for a long path through a symlink to the socket file
  * (Spelling `Linked` with `removable: false`), that removes the symlink and
  * leaves the socket file.
  */
@@ -62,9 +69,10 @@ export function connectEx(path: string, options: Options = {}): Promise<Connecte
 
 /**
  * Spells path so that the standard can bind it (`net.Server.listen`,
- * `Bun.listen`, `Bun.serve({ unix })`, ...): path itself where the standard
- * takes it, otherwise a spelling naming the same place for as long as its
- * `spelling` says. Nothing is bound. ENAMETOOLONG where no spelling fits.
+ * `Bun.listen`, `Bun.serve({ unix })`, ...): an absolute path itself where
+ * the standard takes it, otherwise a spelling naming the same place for as
+ * long as its `spelling` says (a relative path is made absolute first, as
+ * `bind` makes it). Nothing is bound. ENAMETOOLONG where no spelling fits.
  */
 export function resolveForBind(path: string, options: Options = {}): ForBind {
   return resolveForBindIn(defaultWorld(), path, options, forNodeNet);
@@ -72,8 +80,9 @@ export function resolveForBind(path: string, options: Options = {}): ForBind {
 
 /**
  * Spells path so that the standard can connect to it (`net.connect`,
- * `fetch(url, { unix })`, ...), as many times as you like until `cleanup()`.
- * `usableCrossUid` is not looked at.
+ * `fetch(url, { unix })`, ...), as many times as you like until `cleanup()`
+ * and for as long as its `spelling` says (a relative path is made absolute
+ * first). `usableCrossUid` is not looked at.
  */
 export function resolveForConnect(path: string, options: Options = {}): ForConnect {
   return resolveForConnectIn(defaultWorld(), path, options, forNodeNet);

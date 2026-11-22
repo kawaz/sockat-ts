@@ -1,12 +1,12 @@
 # AGENTS.md — sockat-ts の作業ルール
 
-sockat-ts は、`sun_path` の上限を超えるパスでも Unix domain socket を bind / connect できる TypeScript のライブラリ (package `@kawaz/sockat`、Node 22 以上と Bun)。短いパスは標準 (node:net、`Bun.listen` / `Bun.connect`) にそのまま渡し、長いパスだけを OS ごとの経路で短い綴りにして渡す。
+sockat-ts は、`sun_path` の上限を超えるパスでも Unix domain socket を bind / connect できる TypeScript のライブラリ (package `@kawaz/sockat`、Node 22 以上と Bun)。短い絶対パスは標準 (node:net、`Bun.listen` / `Bun.connect`) にそのまま渡し、長いパスだけを OS ごとの経路で短い綴りにして渡す。bind と resolve は、相対パスを絶対パスにしてから同じに扱う (ハブの DR-0019)。
 
 言語によらない振る舞いの正本はハブの [sockat の仕様](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md) (kawaz/sockat、手元は `../../sockat/main`) で、sockat-ts はその TypeScript 実装。Go 版 (`../../sockat-go/main`) が最も近い参考実装。
 
 ## 必読
 
-- [docs/decisions/](docs/decisions/INDEX.md) — TypeScript 版の設計 (公開 API の形、native 抜きで作る経路とロック、標準に渡す長さ)
+- [docs/decisions/](docs/decisions/INDEX.md) — TypeScript 版の設計 (公開 API の形、native 抜きで作る経路とロック、標準に渡す長さ、相対パスを絶対パスにする細部)
 - ハブの [SPEC](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md)・[SPEC-routes](https://github.com/kawaz/sockat/blob/main/docs/SPEC-routes-ja.md)・[DR-0017](https://github.com/kawaz/sockat/blob/main/docs/decisions/DR-0017-resolve-through-persistent-base.md) — 置き場と経路の作り方の正本
 
 ## 構成
@@ -21,7 +21,7 @@ sockat-ts は、`sun_path` の上限を超えるパスでも Unix domain socket 
 | `src/errors.ts` | エラーの形 (Node の流儀の OS のエラー、`ERR_INVALID_ARG_VALUE`、一般のエラー、診断の `route`・`skipped`)、`Trace`、`Unusable`、errno の読み取り |
 | `src/config.ts` | 環境の読み方 (`Config`: OS、標準に渡す長さ、綴りの上限 (sockaddr に入る長さ)、置き場の候補、`/proc`、bind が symlink を辿るか、乱数、ロックの手段) と `envConfig` |
 | `src/world.ts` | `World` (プロセスが持つ B)、B の作り方・確かめ方、D の作り方とロック、resolve の E、`defaultWorld` / `setDefaultWorld` (試験用) |
-| `src/route.ts` | 経路の前の検査 (`classify`: base の形・空・NUL・abstract・長さ)、標準に渡す綴り (`forNodeNet`: 数値に読める綴りに `./`)、ソケットのディレクトリを先に引く `lookUpDir`、経路の失敗のエラー |
+| `src/route.ts` | 経路の前の検査 (base の形・空・NUL・abstract)、bind と resolve の入口の分け方 (`entryOf`: 相対パスを絶対パスの候補 (実パスと `$PWD`) にし、標準か経路かを決める。ハブの DR-0019)、connect の長さの分け方 (`classify`)、標準に渡す綴り (`forNodeNet`: 相対のまま渡す数値に読める綴りに `./`)、ソケットのディレクトリを先に引く `lookUpDir`、経路の失敗のエラー |
 | `src/bind.ts` | bind の列 (`bindSteps`: link-dir・link-file、作らない経路の skipped) と B を通る綴り (procB と実パス、長さの見積もり、`Spelling`) |
 | `src/connect.ts` | connect の列 (`connectSteps`: proc-direct・relative・link-file、作らない経路の skipped) と相対パスの作り方 |
 | `src/drive.ts` | 列 (generator) を標準に渡して回す `driveAsync` / `driveSync` と、`bindEx` の覚え方 (`beforeBind`・`boundOf`) |
@@ -30,7 +30,7 @@ sockat-ts は、`sun_path` の上限を超えるパスでも Unix domain socket 
 | `src/sweep.ts` | `sweep` / `sweepBase` の本体 (死んだ D を排他のロックで見分けて消す) |
 | `src/lock.ts` | D のロック (`O_SHLOCK` / `O_EXLOCK`、`flock(1)` に fd を継がせる形) |
 | `src/fsx.ts` | `(st_dev, st_ino)`、実パス、`socketAt`、`*at` の代わり (`/proc/self/fd/<fd>/<名前>` か確かめた実パス) |
-| `src/paths.ts` / `src/names.ts` | パスの算術、乱数の名前と `createAt` |
+| `src/paths.ts` / `src/names.ts` | パスの算術 (`$PWD` の候補の字句の畳み `foldLexically` を含む)、乱数の名前と `createAt` |
 | `conformance/cli.ts` | ハブの適合試験の CLI (`just conformance [node\|bun]`)。package に入らない |
 | `test/*.test.ts` | 試験 (`node:test` で書き、Node と Bun の両方で走る)。`readme.test.ts` はマニュアル (`docs/MANUAL-ja.md`) の推奨コードを動かす。`helpers.ts` が試験専用の置き場と world を用意し、`child.ts` が cwd を変える試験を子プロセスで走らせる |
 
@@ -46,7 +46,7 @@ sockat-ts は、`sun_path` の上限を超えるパスでも Unix domain socket 
 ## 守ること
 
 - **振る舞いを変える時は、先にハブの SPEC を直す。** SPEC と食い違う・決まらない所は自分で決めずハブの統括に聞く
-- **標準に渡す長さ以下のパスには何も足さない** (DR-0003)
+- **標準に渡す長さ以下の絶対パスには何も足さない** (DR-0003)。相対パスは、bind と resolve では絶対パスにし、connect 系では相対のまま渡す (ハブの DR-0019)
 - **経路の本当の失敗は次の経路でやり直さない。** 次へ進むのは経路自体が使えない時だけ。失敗した時はその呼び出しで作った E を消してから返す
 - **既定の connect は D を作らず、E を残さない**
 - **経路は公開 API に出さない。** 試験はパッケージの中から環境の読み方を差し替えて各経路を強制する

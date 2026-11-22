@@ -2,12 +2,15 @@ import { type CallSite, NoBase, systemError, type Trace, Unusable } from "./erro
 import fs from "node:fs";
 import { attempt, closeQuietly, fstatId, lstat, oPath, sameId, statId } from "./fsx.ts";
 import { randomLength } from "./names.ts";
-import { byteLength } from "./paths.ts";
-import { absTarget, classify, lookUpDir, noNative, type Outcome, type RouteName, routeFailure, type SocketDir, type StandardSpelling } from "./route.ts";
+import { byteLength, isAbs } from "./paths.ts";
+import { absTarget, entryOf, noNative, type Outcome, type RouteName, routeFailure, type SocketDir, type StandardSpelling } from "./route.ts";
 import type { Options, Spelling } from "./types.ts";
 import { type Base, crossOf, type Fits, type Link, type ProcD, removeLink, type World } from "./world.ts";
 
-// The bind order of a long path (SPEC "bind の順", DR-0002):
+// The bind order of a path that takes the routes (SPEC "bind の順", DR-0002):
+// an absolute one longer than the standard length whose real path does not
+// fit either, or a relative one whose absolute candidates do not fit (SPEC
+// "相対パスを絶対パスにする").
 //
 //   | system           | order                                         |
 //   |------------------|-----------------------------------------------|
@@ -22,7 +25,8 @@ import { type Base, crossOf, type Fits, type Link, type ProcD, removeLink, type 
 // long as E is there. A route that cannot be used is passed over (recorded
 // in the trace); the first route that binds decides, its failure included,
 // except link-file's failure where nothing is at the path (bind(2) did not
-// follow the symlink).
+// follow the symlink). When no route can be used, a relative path within
+// the standard length goes to the standard as it is (CwdRelative).
 
 /** What a bind produced besides the listener. */
 export interface BindResult {
@@ -35,15 +39,27 @@ export interface BindResult {
   /** The spelling handed to the standard. */
   readonly spelt: string;
   /**
-   * Where the route made the socket, for SocketFile to record (SPEC
-   * "remove"): link-dir's E points to the socket's directory as a real path,
-   * and the socket is that directory and the file name. null where the path
-   * itself is looked up after the bind (standard, link-file).
+   * The listener's address in place of the spelling (DR-0002): the absolute
+   * path given, or the absolute form of a relative one (entryOf's shown);
+   * a relative path handed to the standard as it is, itself.
    */
-  readonly madeIn: { readonly dir: string; readonly name: string } | null;
+  readonly shown: string;
+  /** Where SocketFile records the socket bound (SPEC "remove"). */
+  readonly record: RecordAt;
 }
 
-/** One bind, or one resolve, of a long path. */
+/**
+ * Where the socket bound is recorded (SPEC "remove"): made, the directory
+ * (a real path) a route made it in, with the file name (link-dir: E points
+ * there; a symlink on the way changed since is not followed); lookUp, a
+ * path whose real path is looked up after the bind (standard: the spelling
+ * handed to it; link-file: what E points to).
+ */
+export type RecordAt =
+  | { readonly kind: "made"; readonly dir: string; readonly name: string }
+  | { readonly kind: "lookUp"; readonly path: string };
+
+/** One bind, or one resolve, of a path that takes the routes. */
 export interface BindCall {
   readonly w: World;
   readonly path: string;
@@ -54,10 +70,21 @@ export interface BindCall {
   readonly noD: Set<Base>;
 }
 
-/** Looks up the socket's directory (lookUpDir) and starts a bind call. */
-export function newBindCall(w: World, path: string, opts: Options, site: CallSite): BindCall {
-  const dir = lookUpDir(w, path, opts, opts.usableCrossUid === true, site);
+/**
+ * Starts a bind call through the socket's directory entryOf looked up,
+ * checking Options.base first (making nothing) with usableCrossUid as the
+ * call has it: only now, as B is used only by the routes.
+ */
+export function newBindCall(w: World, path: string, dir: SocketDir, opts: Options, site: CallSite): BindCall {
+  if (opts.base !== undefined) {
+    w.checkGiven(opts.base, opts.usableCrossUid === true, site);
+  }
   return { w, path, dir, opts, site, noD: new Set() };
+}
+
+/** Why standard was skipped for a path that takes the routes. */
+export function standardSkipped(path: string): string {
+  return isAbs(path) ? "path too long" : "no absolute candidate fits";
 }
 
 /** b's D for a route of this call; unusable when it could not be made, for this route and every later one. */
@@ -320,12 +347,28 @@ function bindOrder(w: World): RouteName[] {
 }
 
 /**
+ * Hands spelt to the standard (route standard): its failure is the
+ * standard's own error; the socket bound is recorded by spelt's real path.
+ */
+function* toStandard(trace: Trace, spelt: string, spelling: Spelling, shown: string): Generator<string, BindResult, Outcome> {
+  const o = yield spelt;
+  trace.route = "standard";
+  if (!o.ok) {
+    throw o.error;
+  }
+  return { route: "standard", spelling, base: null, link: null, spelt, shown, record: { kind: "lookUp", path: spelt } };
+}
+
+/**
  * The bind of path, as the steps the standard takes: yields each spelling to
- * bind (and listen) and gets what the standard did with it. A path the
- * standard takes, and an abstract name, are yielded as they are; their
- * failure is the standard's own error. A long path takes the bind order; a
- * route that bound and failed removes its E and throws the standard's errno
- * with the caller's path. ENAMETOOLONG when no route can be used.
+ * bind (and listen) and gets what the standard did with it (SPEC "相対パスを
+ * 絶対パスにする", "bind の順"). An abstract name, an absolute path the
+ * standard takes, and an absolute candidate that fits, go to the standard
+ * (entryOf); their failure is the standard's own error. Otherwise the bind
+ * order: a route that bound and failed removes its E and throws the
+ * standard's errno with the caller's path. When no route can be used, a
+ * relative path within the standard length goes to the standard as it is
+ * (CwdRelative), and anything else is ENAMETOOLONG.
  */
 export function* bindSteps(
   w: World,
@@ -337,18 +380,15 @@ export function* bindSteps(
   share: boolean,
 ): Generator<string, BindResult, Outcome> {
   const site: CallSite = { syscall, path };
-  const kind = classify(w, path, opts, spell);
-  if (kind.kind !== "long") {
-    const o = yield kind.spelt;
-    trace.route = "standard";
-    if (!o.ok) {
-      throw o.error;
-    }
-    const spelling: Spelling = kind.kind === "short" && !path.startsWith("/") ? { kind: "CwdRelative" } : { kind: "Original" };
-    return { route: "standard", spelling, base: null, link: null, spelt: kind.spelt, madeIn: null };
+  const e = entryOf(w, path, opts, spell, site);
+  if (e.kind === "abstract") {
+    return yield* toStandard(trace, path, { kind: "Original" }, path);
   }
-  const c = newBindCall(w, path, opts, site);
-  trace.skip("standard", "path too long");
+  if (e.kind === "standard") {
+    return yield* toStandard(trace, e.spelt, e.spelling, e.shown);
+  }
+  const c = newBindCall(w, path, e.dir, opts, site);
+  trace.skip("standard", standardSkipped(path));
   for (const route of bindOrder(w)) {
     let ln: Linked | Unusable;
     let target = "";
@@ -377,8 +417,8 @@ export function* bindSteps(
     const o = yield ln.spelling;
     if (o.ok) {
       trace.route = route;
-      const madeIn = route === "link-dir" ? { dir: c.dir.real, name: c.dir.name } : null;
-      return { route, spelling: ln.sp, base: ln.base, link: ln.link, spelt: ln.spelling, madeIn };
+      const record: RecordAt = route === "link-dir" ? { kind: "made", dir: c.dir.real, name: c.dir.name } : { kind: "lookUp", path: target };
+      return { route, spelling: ln.sp, base: ln.base, link: ln.link, spelt: ln.spelling, shown: e.shown, record };
     }
     // The E this call made goes, a failure to remove it not reported (the
     // bind's error is the call's). The default bind's shared E stays, even
@@ -398,6 +438,11 @@ export function* bindSteps(
     }
     trace.route = route;
     throw routeFailure(o.error, site, ln.spelling);
+  }
+  if (e.asItIs !== null) {
+    // Standard is taken after all: skipped has the routes only.
+    trace.unskip("standard");
+    return yield* toStandard(trace, e.asItIs, { kind: "CwdRelative" }, path);
   }
   throw systemError("ENAMETOOLONG", syscall, path);
 }

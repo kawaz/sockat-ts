@@ -10,8 +10,8 @@ import fs from "node:fs";
 import net from "node:net";
 import * as v from "valibot";
 import { errnoCode } from "../src/errors.ts";
-import { bindExIn, connectAt, connectExIn, listenAt } from "../src/netapi.ts";
-import { resolveForBindIn } from "../src/resolve.ts";
+import { bindExIn, bindIn, connectAt, connectExIn, listenAt } from "../src/netapi.ts";
+import { resolveForBindIn, resolveForConnectIn } from "../src/resolve.ts";
 import { world } from "./helpers.ts";
 
 const Command = v.variant("op", [
@@ -31,9 +31,44 @@ const Command = v.variant("op", [
     chdirTo: v.string(),
     when: v.picklist(["before", "after"]),
     look: v.array(v.string()),
+    bare: v.optional(v.boolean()),
   }),
-  v.object({ op: v.literal("numeric"), name: v.string(), long: v.string() }),
+  v.object({ op: v.literal("numeric"), name: v.string(), long: v.string(), bare: v.optional(v.boolean()) }),
+  v.object({
+    op: v.literal("bind-rel"),
+    path: v.string(),
+    pwd: v.optional(v.string()),
+    bare: v.optional(v.boolean()),
+    chdirTo: v.optional(v.string()),
+    look: v.optional(v.array(v.string()), []),
+  }),
+  v.object({ op: v.literal("resolve-rel"), path: v.string(), pwd: v.optional(v.string()), bare: v.optional(v.boolean()) }),
+  v.object({ op: v.literal("deep-cwd") }),
 ]);
+
+/**
+ * The tests' world, with $PWD as given (none when not) and, when bare, no
+ * route that can be used: no place for B and no /proc (so no B in the
+ * socket's directory can be spelt short either).
+ */
+function relWorld(pwd: string | undefined, bare: boolean | undefined): ReturnType<typeof world> {
+  return world({
+    getenv: (n) => (n === "PWD" ? pwd : undefined),
+    ...(bare === true ? { tmp: "/nonexistent-stt-place", proc: "" } : {}),
+  });
+}
+
+/** The names of the routes skipped, from a result or an error. */
+function skippedOf(x: unknown): unknown[] {
+  return typeof x === "object" && x !== null && "skipped" in x && Array.isArray(x.skipped)
+    ? x.skipped.map((s: unknown) => (typeof s === "object" && s !== null && "name" in s ? s.name : null))
+    : [];
+}
+
+/** The route of an error (null for none). */
+function routeOf(x: unknown): unknown {
+  return typeof x === "object" && x !== null && "route" in x ? x.route : null;
+}
 
 function print(out: unknown): void {
   process.stdout.write(`${JSON.stringify(out)}\n`);
@@ -134,7 +169,7 @@ switch (cmd.op) {
     // bindEx of a relative path whose cwd changes just before, or just
     // after, the bind: what is at each path to look at afterwards.
     try {
-      const b = await bindExIn(world(), cmd.path, {}, async (spelling) => {
+      const b = await bindExIn(relWorld(undefined, cmd.bare), cmd.path, {}, async (spelling) => {
         if (cmd.when === "before") {
           process.chdir(cmd.chdirTo);
         }
@@ -155,7 +190,7 @@ switch (cmd.op) {
     // A relative path that node:net would read as a TCP port (name), bound
     // and connected in the cwd through node:net; and long, a relative path
     // whose "./" spelling is over the standard length.
-    const w = world();
+    const w = relWorld(undefined, cmd.bare);
     try {
       const b = await bindExIn(w, cmd.name, {});
       b.socket.on("connection", (s) => s.end("unix"));
@@ -186,12 +221,12 @@ switch (cmd.op) {
         out["longFile"] = kinds([cmd.long])[0];
       }
       if (typeof Bun !== "undefined") {
-        const bun = await import("../src/bun.ts");
-        const bl = bun.listen({ unix: cmd.name, socket: { data() {}, open(s) { s.end("bun"); } } });
+        const bun = await import("../src/bunapi.ts");
+        const bl = bun.listenIn(w, { unix: cmd.name, socket: { data() {}, open(s) { s.end("bun"); } } });
         out["bunUnix"] = bl.unix;
         out["bunFile"] = kinds([cmd.name])[0];
         out["bunGot"] = await new Promise<string>((resolve, reject) => {
-          bun.connect({ unix: cmd.name, socket: { data: (_s, d) => resolve(Buffer.from(d).toString()) } }).catch(reject);
+          bun.connectIn(w, { unix: cmd.name, socket: { data: (_s, d) => resolve(Buffer.from(d).toString()) } }).catch(reject);
         });
         bl.stop(true);
       }
@@ -199,6 +234,103 @@ switch (cmd.op) {
     } catch (e) {
       print(failure(e));
     }
+    break;
+  }
+  case "bind-rel": {
+    // bindEx of a (relative) path in the cwd, with $PWD as given: what the
+    // standard was handed (in order), what the result says, and the
+    // listener's address. Then, after an optional chdir, what is at each
+    // path to look at after remove() and after closing the listener. On
+    // Bun, listenEx of the same path in the same way afterwards.
+    const w = relWorld(cmd.pwd, cmd.bare);
+    const spellings: string[] = [];
+    let out: Record<string, unknown>;
+    try {
+      const b = await bindExIn(w, cmd.path, {}, (spelling) => {
+        spellings.push(spelling);
+        return listenAt(spelling);
+      });
+      out = {
+        ok: true,
+        route: b.route,
+        spelling: b.spelling,
+        skipped: skippedOf(b),
+        address: b.socket.address(),
+        spellings,
+        bound: kinds(cmd.look),
+      };
+      if (cmd.chdirTo !== undefined) {
+        process.chdir(cmd.chdirTo);
+      }
+      b.file.remove();
+      out["removed"] = kinds(cmd.look);
+      await new Promise<void>((resolve) => b.socket.close(() => resolve()));
+      out["closed"] = kinds(cmd.look);
+    } catch (e) {
+      out = { ...failure(e), route: routeOf(e), skipped: skippedOf(e), spellings, look: kinds(cmd.look) };
+    }
+    if (typeof Bun !== "undefined" && out["ok"] === true && cmd.chdirTo === undefined) {
+      const bun = await import("../src/bunapi.ts");
+      const l = bun.listenExIn(w, { unix: cmd.path, socket: { data() {} } }, {});
+      out["bunUnix"] = l.socket.unix;
+      out["bunSpelling"] = l.spelling;
+      l.file.remove();
+      l.socket.stop(true);
+    }
+    print(out);
+    break;
+  }
+  case "resolve-rel": {
+    // resolveForBind and resolveForConnect of a (relative) path in the cwd.
+    const w = relWorld(cmd.pwd, cmd.bare);
+    const one = (f: () => { path: string; spelling: unknown; route: string; skipped: unknown[]; cleanup: () => void }): unknown => {
+      try {
+        const r = f();
+        r.cleanup();
+        return { ok: true, path: r.path, spelling: r.spelling, route: r.route, skipped: skippedOf(r) };
+      } catch (e) {
+        return { ...failure(e), route: routeOf(e), skipped: skippedOf(e) };
+      }
+    };
+    print({
+      bind: one(() => resolveForBindIn(w, cmd.path, {})),
+      connect: one(() => resolveForConnectIn(w, cmd.path, {})),
+    });
+    break;
+  }
+  case "deep-cwd": {
+    // Started in a cwd deeper than PATH_MAX (made by a shell with relative
+    // mkdir and cd: Bun's mkdirSync of a relative path fails there, ERANGE
+    // from getcwd), $PWD its spelling: the default bind, bindEx and the
+    // resolves of a short relative path, and of one over the standard
+    // length. The shell removes what is left.
+    const w = world({ getenv: (n) => (n === "PWD" ? process.env["PWD"] : undefined) });
+    const out: Record<string, unknown> = {};
+    try {
+      const s = await bindIn(w, "s.sock");
+      out["bind"] = { ok: true, address: s.address(), file: kinds(["s.sock"])[0] };
+      await new Promise<void>((resolve) => s.close(() => resolve()));
+    } catch (e) {
+      out["bind"] = failure(e);
+    }
+    try {
+      const b = await bindExIn(w, "x.sock", {});
+      out["bindEx"] = { ok: true, route: b.route };
+      b.socket.close();
+    } catch (e) {
+      out["bindEx"] = { ...failure(e), file: kinds(["x.sock"])[0] };
+    }
+    const resolved = (path: string): unknown => {
+      try {
+        const f = resolveForBindIn(w, path, {});
+        return { ok: true, path: f.path, spelling: f.spelling, route: f.route, skipped: skippedOf(f) };
+      } catch (e) {
+        return { ...failure(e), route: routeOf(e), skipped: skippedOf(e) };
+      }
+    };
+    out["resolve"] = resolved("r.sock");
+    out["long"] = resolved("n".repeat(w.cfg.standardLength + 1));
+    print(out);
     break;
   }
 }

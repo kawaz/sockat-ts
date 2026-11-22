@@ -84,26 +84,25 @@ export function driveSync<R, S>(
 
 /**
  * What bindEx looks at before the bind: whether there is a file to record
- * (not for an abstract name), and the cwd for a relative path (SPEC
- * "remove": the cwd is compared before the bind and after the file is
- * recorded). The file itself is looked up after the bind (boundOf), as SPEC
- * "remove" records it: looked up before, a symlink on the way changed in
- * between would have it record a file other than the one bound.
+ * (not for an abstract name), and the cwd for a relative path, before
+ * anything is looked up (SPEC "remove": for a CwdRelative spelling the cwd
+ * is compared before the bind and after the file is recorded). The file
+ * itself is looked up after the bind (boundOf), as SPEC "remove" records
+ * it: looked up before, a symlink on the way changed in between would have
+ * it record a file other than the one bound.
  */
 export interface BeforeBind {
   readonly file: boolean;
   readonly cwd: ReturnType<typeof cwdId>;
-  readonly relative: boolean;
 }
 
 export function beforeBind(path: string): BeforeBind {
   // A NUL is an abstract name (no file to record) or an argument error,
   // which the bind's own checks throw.
   if (path.includes("\0")) {
-    return { file: false, cwd: null, relative: false };
+    return { file: false, cwd: null };
   }
-  const relative = !path.startsWith("/");
-  return { relative, cwd: relative ? cwdId() : null, file: true };
+  return { cwd: path.startsWith("/") ? null : cwdId(), file: true };
 }
 
 /**
@@ -123,25 +122,26 @@ export interface Release {
 }
 
 /**
- * Whether closing the listener of a short path that bindEx could not
- * record unlinks the socket bound and nothing else (DR-0004): the standard
- * unlinks the path itself at the close, so it is only when the path names
- * the socket recorded right after the bind. A relative path is unlinked
- * against the cwd at the close, so the bind must also have happened in the
- * cwd there is now (bindCwd). Where nothing was recorded, nothing can be
- * told to be the socket bound.
+ * Whether closing the listener of a spelling handed to the standard that
+ * bindEx could not record unlinks the socket bound and nothing else
+ * (DR-0004): the standard unlinks the spelling it was handed at the close,
+ * so it is only when the spelling names the socket recorded right after the
+ * bind. A spelling relative to the cwd (CwdRelative) is unlinked against the
+ * cwd at the close, so the bind must also have happened in the cwd there is
+ * now (bindCwd). Where nothing was recorded, nothing can be told to be the
+ * socket bound.
  */
-function closeUnlinksOurs(path: string, relative: boolean, bindCwd: FileId | null, recorded: { id: FileId } | null): boolean {
+function closeUnlinksOurs(spelt: string, cwdRelative: boolean, bindCwd: FileId | null, recorded: { id: FileId } | null): boolean {
   if (recorded === null) {
     return false;
   }
-  if (relative) {
+  if (cwdRelative) {
     const now = cwdId();
     if (bindCwd === null || now === null || !sameId(bindCwd, now)) {
       return false;
     }
   }
-  const at = lstatId(path);
+  const at = lstatId(spelt);
   return at !== null && sameId(at, recorded.id);
 }
 
@@ -155,14 +155,17 @@ export function boundOf<S>(
   trace: Trace,
 ): Bound<S> {
   const cleaner = new Cleaner(result.link, path);
+  // Only a spelling relative to the cwd depends on it: an absolute one (a
+  // relative path made absolute included) is recorded whatever the cwd.
+  const cwdRelative = result.spelling.kind === "CwdRelative";
   let recorded: { file: string; id: { dev: bigint; ino: bigint } } | null = null;
   if (before.file) {
     // link-dir made the socket in the directory its E points to: that is
     // what is recorded, not the path looked up again (a symlink on the way
-    // may have changed since the route was set up). The others look the
-    // path up now, after the bind.
-    const file: ReturnType<typeof realFile> =
-      result.madeIn !== null ? { ok: true, value: joinUnder(result.madeIn.dir, result.madeIn.name) } : realFile(path);
+    // may have changed since the route was set up). The others look their
+    // spelling (standard) or E's target (link-file) up now, after the bind.
+    const at = result.record;
+    const file: ReturnType<typeof realFile> = at.kind === "made" ? { ok: true, value: joinUnder(at.dir, at.name) } : realFile(at.path);
     let ok = file.ok;
     if (file.ok) {
       const sock = socketAt(file.value);
@@ -171,7 +174,7 @@ export function boundOf<S>(
         recorded = sock.value;
       }
     }
-    if (ok && before.relative) {
+    if (ok && cwdRelative) {
       const now = cwdId();
       ok = now !== null && before.cwd !== null && sameId(now, before.cwd);
     }
@@ -184,12 +187,12 @@ export function boundOf<S>(
         // The error of the call is that the file could not be recorded.
       }
       let left: string;
-      if (result.link === null && !closeUnlinksOurs(path, before.relative, bindCwd, recorded)) {
-        // Closing would unlink the path (against the cwd there is now, for
-        // a relative one), which is not, or cannot be told to be, the
+      if (result.link === null && !closeUnlinksOurs(result.spelt, cwdRelative, bindCwd, recorded)) {
+        // Closing would unlink the spelling (against the cwd there is now,
+        // for a relative one), which is not, or cannot be told to be, the
         // socket bound: whatever replaced it would go.
         release.unref();
-        left = before.relative
+        left = cwdRelative
           ? "the listener was left open and unref'd rather than closed (closing it would unlink the path in the current directory, which is not, or cannot be told to be, the socket bound); the socket file stays where it was bound"
           : "the listener was left open and unref'd rather than closed (closing it would unlink the path, which is not, or cannot be told to be, the socket bound)";
       } else {

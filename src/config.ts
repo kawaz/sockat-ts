@@ -32,7 +32,7 @@ export interface Config {
   readonly spellingLength: number;
   /** The first place for B (SPEC-routes "実体の置き場"): /tmp. */
   readonly tmp: string;
-  /** Reads $XDG_RUNTIME_DIR and $TMPDIR at each call. */
+  /** Reads $XDG_RUNTIME_DIR, $TMPDIR and $PWD (the binds' and resolves' $PWD candidate) at each call. */
   readonly getenv: (name: string) => string | undefined;
   /** Where the kernel's /proc is ("" for none: the routes through it are not tried). */
   readonly proc: string;

@@ -62,6 +62,18 @@ export class Trace {
   skip(name: string, reason: string): void {
     this.skipped.push({ name, reason });
   }
+
+  /**
+   * Takes name back out of the skipped: the route that is taken after all
+   * (standard, with a relative path as it is, once no route could be used;
+   * SPEC "相対パスを絶対パスにする").
+   */
+  unskip(name: string): void {
+    const i = this.skipped.findIndex((s) => s.name === name);
+    if (i >= 0) {
+      this.skipped.splice(i, 1);
+    }
+  }
 }
 
 /** The name and message of each errno, by name, from the runtime's table. */

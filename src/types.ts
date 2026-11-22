@@ -23,14 +23,20 @@ export interface Options {
 }
 
 /**
- * What the spelling of a bind is good for afterwards: the spelling the
- * kernel keeps for the socket, which code may later unlink or look up.
- * Branch on it rather than on the diagnostics.
+ * What the spelling of a bind or a resolve is good for afterwards: the
+ * spelling the kernel keeps for the socket, which code may later unlink or
+ * look up. Branch on it rather than on the diagnostics.
  */
 export type Spelling =
-  /** The path itself, absolute. */
+  /**
+   * An absolute path: the path given, or one naming the same place (a
+   * relative path made absolute, the real path of a long one).
+   */
   | { readonly kind: "Original" }
-  /** The path itself, relative: after a change of the cwd it names another place. */
+  /**
+   * The relative path given, as it is (no absolute spelling and no route
+   * could be used): after a change of the cwd it names another place.
+   */
   | { readonly kind: "CwdRelative" }
   /** Through B, D and E, naming the same place as the path. */
   | {
@@ -97,6 +103,14 @@ export interface ForBind {
 export interface ForConnect {
   /** The spelling to hand to the standard in place of the path, as many times as you like. */
   readonly path: string;
+  /**
+   * What the spelling is good for while you keep it: `Original` (an
+   * absolute path), `CwdRelative` (the relative path given, for no other
+   * spelling could be made: it names another place once the cwd changes),
+   * or `Linked` (through B, D and E: not `removable`, and until the process
+   * ends where `until` is `Process`).
+   */
+  readonly spelling: Spelling;
   readonly route: string;
   readonly skipped: Skip[];
   /** Removes the E the spelling goes through. */

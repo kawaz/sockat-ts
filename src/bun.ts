@@ -18,7 +18,9 @@ export type { RouteDiagnostics, SystemError } from "./errors.ts";
 
 /**
  * `Bun.listen(options)` for a `unix` path of any length: synchronous, as
- * Bun.listen is. The listener's `unix` is the path given. Stopping it
+ * Bun.listen is. A relative `unix` is made absolute first, as `bind` of
+ * `@kawaz/sockat` makes it. The listener's `unix` is the path given when it
+ * is absolute, and the absolute form of a relative one. Stopping it
  * unlinks the spelling the kernel keeps: for a long path through a symlink
  * to the socket file (Spelling `Linked` with `removable: false`), that
  * removes the symlink and leaves the socket file.

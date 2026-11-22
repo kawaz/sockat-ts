@@ -45,25 +45,26 @@ export function connectAt(spelling: string): Promise<Attempted<net.Socket>> {
 }
 
 /**
- * The listener's address() returns what the standard's returns, with the
- * caller's path in place of the spelling the kernel keeps (DR-0002) when
- * they differ: the path while it listens; once closed, whatever the
- * standard gives then (Node keeps the name it listened on, Bun's node:net
- * gives null), never the spelling.
+ * The listener's address() returns what the standard's returns, with shown
+ * in place of the spelling the kernel keeps (DR-0002) when they differ:
+ * shown while it listens (the path given when absolute, the absolute form
+ * of a relative one; SPEC "相対パスを絶対パスにする"); once closed, whatever
+ * the standard gives then (Node keeps the name it listened on, Bun's
+ * node:net gives null), never the spelling.
  */
-function showPath(server: net.Server, path: string, spelt: string): void {
-  if (spelt !== path) {
+function showPath(server: net.Server, shown: string, spelt: string): void {
+  if (spelt !== shown) {
     const standard = server.address.bind(server);
     server.address = () => {
       const a = standard();
-      return a === spelt ? path : a;
+      return a === spelt ? shown : a;
     };
   }
 }
 
 export async function bindIn(w: World, path: string): Promise<net.Server> {
   const { result, socket } = await driveAsync(bindSteps(w, path, {}, new Trace(), "listen", forNodeNet, true), listenAt);
-  showPath(socket, path, result.spelt);
+  showPath(socket, result.shown, result.spelt);
   return socket;
 }
 
@@ -82,7 +83,7 @@ export async function bindExIn(
   try {
     const before = beforeBind(path);
     const { result, socket, bindCwd } = await driveAsync(bindSteps(w, path, options, trace, "listen", forNodeNet, false), at);
-    showPath(socket, path, result.spelt);
+    showPath(socket, result.shown, result.spelt);
     return boundOf(path, before, result, socket, bindCwd, { close: () => socket.close(), unref: () => socket.unref() }, trace);
   } catch (e) {
     throw diagnosed(e, trace);

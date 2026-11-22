@@ -95,21 +95,23 @@ describe("external review", () => {
     await closeServer(other);
   });
 
-  // DR-0004 (1-6): bindEx of a short relative path that cannot record its
-  // file because the cwd changed. Changed after the bind, the standard's
-  // close would unlink the path in the new cwd, which holds an unrelated
-  // file: the listener is not closed (unref'd), and both files stay.
-  // Changed before the bind, the bind went to the new cwd and the path
-  // there is the socket bound: the listener is closed, which unlinks it, as
-  // SPEC has it, and the unrelated file in the old cwd stays.
+  // DR-0004 (1-6): bindEx of a short relative path handed to the standard
+  // as it is (CwdRelative: no route can be used here, no place and no
+  // /proc) that cannot record its file because the cwd changed. Changed
+  // after the bind, the standard's close would unlink the path in the new
+  // cwd, which holds an unrelated file: the listener is not closed
+  // (unref'd), and both files stay. Changed before the bind, the bind went
+  // to the new cwd and the path there is the socket bound: the listener is
+  // closed, which unlinks it, as SPEC has it, and the unrelated file in the
+  // old cwd stays.
   for (const when of ["after", "before"] as const) {
-    test(`bindEx of a relative path whose cwd changed ${when} the bind closes only when that unlinks its own socket`, async () => {
-      const one = shortDir();
-      const two = shortDir();
+    test(`bindEx of a CwdRelative path whose cwd changed ${when} the bind closes only when that unlinks its own socket`, async () => {
+      const one = deepDir(tempDir());
+      const two = deepDir(tempDir());
       const unrelated = when === "after" ? two : one;
       fs.writeFileSync(`${unrelated}/s.sock`, "precious");
       const r = await child(
-        { op: "bind-ex-chdir", path: "s.sock", chdirTo: two, when, look: [`${one}/s.sock`, `${two}/s.sock`] },
+        { op: "bind-ex-chdir", path: "s.sock", chdirTo: two, when, look: [`${one}/s.sock`, `${two}/s.sock`], bare: true },
         one,
       );
       const out = v.parse(ChdirBindOut, r.out);

@@ -63,6 +63,33 @@ export function components(path: string): string[] {
   return out;
 }
 
+/**
+ * The absolute path folded as a string, component by component: empty
+ * segments and "." dropped, ".." dropping the component before it (the
+ * root's ".." is the root). Not what the kernel does across a symlink
+ * ("a/sym/.." folds to "a", while the kernel goes to the parent of sym's
+ * target): the caller checks that the result names the same directory
+ * (SPEC-routes "絶対パスの候補の作り方", the $PWD candidate).
+ *
+ * Design rationale: written out rather than path.resolve / path.normalize,
+ * which fold the same way, so that every place that folds ".." is one the
+ * checks go with; the routes never fold.
+ */
+export function foldLexically(path: string): string {
+  const out: string[] = [];
+  for (const c of path.split("/")) {
+    if (c === "" || c === ".") {
+      continue;
+    }
+    if (c === "..") {
+      out.pop();
+      continue;
+    }
+    out.push(c);
+  }
+  return `/${out.join("/")}`;
+}
+
 /** Whether a and b are the same spelling component by component. */
 export function sameComponents(a: string, b: string): boolean {
   const ca = components(a);

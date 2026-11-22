@@ -30,9 +30,13 @@ function freshDir(prefixDir: string): string {
   return d;
 }
 
-/** A fresh directory under $TMPDIR (the session's), for the long paths. */
+/**
+ * A fresh directory under $TMPDIR (the session's), for the long paths: its
+ * real path, so that a path in it is not shorter as a real path (the binds
+ * try the real path before the routes) than it looks.
+ */
 export function tempDir(): string {
-  return freshDir(process.env["TMPDIR"] ?? os.tmpdir());
+  return fs.realpathSync(freshDir(process.env["TMPDIR"] ?? os.tmpdir()));
 }
 
 /** A fresh directory under /tmp, for a path that must be short. */
