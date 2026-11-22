@@ -24,7 +24,7 @@ const server = await bind(path); // returns once it is listening
 const socket = await connect(path); // returns once it is connected
 ```
 
-You get back the same `net.Server` / `net.Socket` as the standard, and short paths go to the standard unchanged, as before. Only for a long path does sockat quietly set up a short way to the same place and connect through it. You don't need to shorten paths yourself or care about each runtime's or OS's limit.
+You get back the same `net.Server` / `net.Socket` as the standard, and short paths go to the standard unchanged, as before. Only for a long path does sockat quietly set up a short way to the same place and connect through it. However deep the socket's directory is, you don't need to shorten paths yourself or care about each runtime's or OS's path limit.
 
 ## Install
 
