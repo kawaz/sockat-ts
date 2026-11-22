@@ -26,7 +26,7 @@ const socket = await connect(path); // returns once it is connected
 
 You get back the same `net.Server` / `net.Socket` as the standard. A short absolute path goes to the standard unchanged; only for a long one does sockat quietly set up a short way to the same place and connect through it. A relative path to bind is first made absolute and treated the same way, so it keeps naming the same socket after the cwd changes. However deep the socket's directory is, you don't need to shorten paths yourself or care about each runtime's or OS's path limit.
 
-## Install
+## Installation
 
 ```sh
 npm install @kawaz/sockat
