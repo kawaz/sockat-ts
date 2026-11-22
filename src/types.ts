@@ -34,8 +34,9 @@ export type Spelling =
    */
   | { readonly kind: "Original" }
   /**
-   * The relative path given, as it is (no absolute spelling and no route
-   * could be used): after a change of the cwd it names another place.
+   * The relative path given, as it is: no absolute spelling and no route
+   * could be used, or a resolve was given a relative path not ending with a
+   * name. After a change of the cwd it names another place.
    */
   | { readonly kind: "CwdRelative" }
   /** Through B, D and E, naming the same place as the path. */
