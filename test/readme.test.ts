@@ -6,11 +6,11 @@ import { describe, test } from "node:test";
 import { bindEx, connect, resolveForBind, resolveForConnect } from "../src/index.ts";
 import { closeServer, deepDir, echo, roundTrip, tempDir } from "./helpers.ts";
 
-// The code README recommends (README-ja.md "使ってはいけない書き方",
+// The code the manual recommends (docs/MANUAL-ja.md "使ってはいけない書き方",
 // "ソケットのファイルを消す", "resolve"), run as it is written there, so
 // what it promises holds.
 
-describe("README's recommended code", () => {
+describe("the manual's recommended code", () => {
   // Bind by an absolute path (the cwd put in front before the bind, so a
   // later chdir cannot retarget it, and no ".." folded as a string), and
   // remove the file before closing the listener: the file is gone and
@@ -31,7 +31,7 @@ describe("README's recommended code", () => {
 
   // A spelling meant for a peer of another uid: with usableCrossUid a long
   // path's spelling is Linked and usableCrossUid (the tests' place lets
-  // others search), as README says; where that cannot be had it is
+  // others search), as the manual says; where that cannot be had it is
   // ENAMETOOLONG (places.test.ts).
   test("ask for a spelling another uid can follow", () => {
     const f = resolveForBind(`${deepDir(tempDir())}/s.sock`, { usableCrossUid: true });
