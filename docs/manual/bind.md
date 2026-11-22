@@ -6,7 +6,7 @@ Part of the [user manual](../MANUAL.md). The code runs in [test/manual.test.ts](
 
 ## Listen with node:net
 
-Write `await bind(path)` instead of `net.createServer().listen(path)`. It returns the standard `net.Server` once it is listening.
+Write `await bind(path)` instead of `net.createServer().listen(path)`. It returns the standard library's `net.Server` once it is listening.
 
 ```ts
 import { bind } from "@kawaz/sockat";

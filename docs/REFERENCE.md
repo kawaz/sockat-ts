@@ -6,14 +6,14 @@ The behaviour is set by [the sockat specification](https://github.com/kawaz/sock
 
 ## Relation to the standard library
 
-- What you get back is the standard `net.Server` / `net.Socket` (node:net, on Node and Bun), and `Bun.UnixSocketListener` / `Bun.Socket` (`@kawaz/sockat/bun`, which throws at once without Bun)
-- The standard length is 107 bytes on Linux and illumos and 103 elsewhere, for Node and Bun alike (`sun_path` less one; Node on Linux also takes 108 bytes without a NUL, which is not handed to it). An absolute path up to it goes to the standard library as it is
+- What you get back is the standard library's `net.Server` / `net.Socket` (node:net, on Node and Bun), and `Bun.UnixSocketListener` / `Bun.Socket` (`@kawaz/sockat/bun`, which throws at once without Bun)
+- The standard library length is 107 bytes on Linux and illumos and 103 elsewhere, for Node and Bun alike (`sun_path` less one; Node on Linux also takes 108 bytes without a NUL, which is not handed to it). An absolute path up to it goes to the standard library as it is
 - A relative path is made absolute first by the binds (`bind`, `bindEx`, `listen`, `listenEx`) and the resolves, and left relative by the connects (`connect`, `connectEx`). See the specification's "[Making a relative path absolute](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md#making-a-relative-path-absolute)" and [Relative paths](#relative-paths) below
 - An empty path, and a path with a NUL other than a leading one, are a `TypeError` (`code` `ERR_INVALID_ARG_VALUE`). On Linux a path with a leading NUL (abstract) goes to the standard library as it is
-- node:net reads a string that looks like a number (`"0"`, `"8080"`, `"1e3"`, blanks, ...) as a TCP port. When a spelling handed over relative (by the connects, and by the binds and the resolves when no candidate and no route can be used) has no `/` and reads so, sockat puts `./` in front (the same file; `Spelling` stays `CwdRelative`, `address()` is the path given). When `./` takes it over the standard length, it is a long path. A bind of `"0"` goes to the standard library as its absolute candidate (`Original`), so no `./` is needed, and `address()` is that absolute path
+- node:net reads a string that looks like a number (`"0"`, `"8080"`, `"1e3"`, blanks, ...) as a TCP port. When a spelling handed over relative (by the connects, and by the binds and the resolves when no candidate and no route can be used) has no `/` and reads so, sockat puts `./` in front (the same file; `Spelling` stays `CwdRelative`, `address()` is the path given). When `./` takes it over the standard library length, it is a long path. A bind of `"0"` goes to the standard library as its absolute candidate (`Original`), so no `./` is needed, and `address()` is that absolute path
 - An OS error has Node's shape (`code`, `errno`, `syscall`, `path`; `path` is the path given)
 - No dependencies on other packages
-- The bind of a long path or a relative path differs from the standard in places. See the specification's "[What differs from the standard for a long path](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md#what-differs-from-the-standard-for-a-long-path)" and [Where it departs from SPEC](#where-it-departs-from-spec) below
+- The bind of a long path or a relative path differs from the standard library in places. See the specification's "[What differs from the standard library for a long path](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md#what-differs-from-the-standard-library-for-a-long-path)" and [Where it departs from SPEC](#where-it-departs-from-spec) below
 
 ## Functions
 
@@ -76,7 +76,7 @@ The meaning is in the specification's "[Spelling properties](https://github.com/
 
 ## Relative paths
 
-The binds and the resolves make a relative path absolute first; the connects hand it over relative. The steps and what differs from the standard are in the specification's "[Making a relative path absolute](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md#making-a-relative-path-absolute)". In TypeScript:
+The binds and the resolves make a relative path absolute first; the connects hand it over relative. The steps and what differs from the standard library are in the specification's "[Making a relative path absolute](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md#making-a-relative-path-absolute)". In TypeScript:
 
 - When an absolute candidate goes to the standard library, `address()` and `unix` return that candidate
 - When it takes a route, they return the form of the real candidate (the real path of the socket's directory and the file name)
@@ -97,7 +97,7 @@ What `file.remove()` and `file.cleanup()` promise is in the specification's "[Cl
 
 What spelling is returned, and when none can be, is in the specification's "[resolve](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md#resolve)" and "[`SocketFile` of `ForBind`](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md#socketfile-of-forbind)". How to use them is in the user manual's "[Resolve a path only](manual/resolve.md)".
 
-- Hand the spelling to the standard (`net.Server.listen`, `net.connect`, `Bun.serve({ unix })`, `fetch(url, { unix })`, node:http's `socketPath`, ...). A spelling that reads as a number comes with `./` in front for node:net
+- Hand the spelling to the standard library (`net.Server.listen`, `net.connect`, `Bun.serve({ unix })`, `fetch(url, { unix })`, node:http's `socketPath`, ...). A spelling that reads as a number comes with `./` in front for node:net
 - Call `ForBind.socketFile()` after it listens and before the listener is closed
 - Where nothing reaches, `ENAMETOOLONG`
 
@@ -139,7 +139,7 @@ const f = resolveForBind(path, { usableCrossUid: true });
 
 ## How a long path is reached
 
-A path over the standard length tries the routes of the specification's "[Routes for long paths and their order](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md#routes-for-long-paths-and-their-order)" in turn. Before the routes, the binds and the resolves see whether an absolute candidate fits (for a relative path the real and the `$PWD` candidates, for a long absolute path its real path), and hand it to the standard library when it does (making nothing in the bases). A relative path, however short, takes the routes when its absolute form is long.
+A path over the standard library length tries the routes of the specification's "[Routes for long paths and their order](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md#routes-for-long-paths-and-their-order)" in turn. Before the routes, the binds and the resolves see whether an absolute candidate fits (for a relative path the real and the `$PWD` candidates, for a long absolute path its real path), and hand it to the standard library when it does (making nothing in the bases). A relative path, however short, takes the routes when its absolute form is long.
 
 A route that needs native code is not made: it is passed over as unusable and named in `skipped` (reason `no native code in sockat-ts`).
 
@@ -156,7 +156,7 @@ A route that needs native code is not made: it is passed over as unusable and na
 
 ### Where it stops reaching
 
-The longest file name sockat-ts reaches (bytes) when the directory alone is over the standard length, the bases as the system has them. Without the routes it does not make, some are shorter than the other languages in the hub's [reach](https://github.com/kawaz/sockat/blob/main/pages/reach/README.md):
+The longest file name sockat-ts reaches (bytes) when the directory alone is over the standard library length, the bases as the system has them. Without the routes it does not make, some are shorter than the other languages in the hub's [reach](https://github.com/kawaz/sockat/blob/main/pages/reach/README.md):
 
 | system | bind (`bind`, `bindEx`, `listen`, `resolveForBind`) | `connect`, `connectEx` | `resolveForConnect` |
 |---|---|---|---|
@@ -181,6 +181,6 @@ On a Linux where `/proc` is not visible (an empty tmpfs mounted over it, for exa
 
 ## Specification and design
 
-- [The sockat specification](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md): the behaviour in every language (the operations, resolve, spelling properties, cleanup, what stays in the bases, the routes, what differs from the standard, patterns not to use, errors)
+- [The sockat specification](https://github.com/kawaz/sockat/blob/main/docs/SPEC.md): the behaviour in every language (the operations, resolve, spelling properties, cleanup, what stays in the bases, the routes, what differs from the standard library, patterns not to use, errors)
 - [Notes per language](https://github.com/kawaz/sockat/blob/main/pages/langs.md): what is specific to each language's implementation
 - [docs/decisions/](decisions/INDEX.md): the design decisions of the TypeScript version (DR, Japanese)

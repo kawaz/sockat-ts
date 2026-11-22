@@ -88,7 +88,7 @@ export interface Connected<S> {
 
 /** A spelling of a path to bind by yourself (SPEC `ForBind`). */
 export interface ForBind {
-  /** The spelling to hand to the standard in place of the path. */
+  /** The spelling to hand to the standard library in place of the path. */
   readonly path: string;
   readonly spelling: Spelling;
   readonly route: string;
@@ -102,7 +102,7 @@ export interface ForBind {
 
 /** A spelling of a path to connect to by yourself (SPEC `ForConnect`). */
 export interface ForConnect {
-  /** The spelling to hand to the standard in place of the path, as many times as you like. */
+  /** The spelling to hand to the standard library in place of the path, as many times as you like. */
   readonly path: string;
   /**
    * What the spelling is good for while you keep it: `Original` (an

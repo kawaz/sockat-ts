@@ -6,7 +6,7 @@
 
 ## node:net でつなぐ
 
-`net.connect(path)` の代わりに `await connect(path)` と書く。connect が終わってから、標準の `net.Socket` が返る。
+`net.connect(path)` の代わりに `await connect(path)` と書く。connect が終わってから、標準ライブラリの `net.Socket` が返る。
 
 ```ts
 import { connect } from "@kawaz/sockat";

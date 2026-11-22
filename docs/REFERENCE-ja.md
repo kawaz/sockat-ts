@@ -4,16 +4,16 @@
 
 言語によらない振る舞いの正本は [sockat の仕様](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md) で、sockat-ts はその TypeScript 実装 (package `@kawaz/sockat`、Node.js 22 以上と Bun、native の部品なし)。ここには TypeScript での名前と型の対応、TypeScript での形、sockat-ts に固有の点を置き、言語によらない説明は仕様の該当の節へリンクする。使い方は [利用マニュアル](MANUAL-ja.md)。
 
-## 標準との対応
+## 標準ライブラリとの対応
 
-- 戻り値は標準の `net.Server` / `net.Socket` (node:net。Node と Bun) と、`Bun.UnixSocketListener` / `Bun.Socket` (`@kawaz/sockat/bun`。Bun 以外で呼ぶとすぐエラー)
-- 標準に渡す長さは、Node も Bun も Linux と illumos は 107 バイト、他は 103 バイトまで (`sun_path` − 1。Linux の Node は NUL の入らない 108 バイトも受け付けるが、渡さない)。それ以下の絶対パスは標準にそのまま渡す
+- 戻り値は標準ライブラリの `net.Server` / `net.Socket` (node:net。Node と Bun) と、`Bun.UnixSocketListener` / `Bun.Socket` (`@kawaz/sockat/bun`。Bun 以外で呼ぶとすぐエラー)
+- 標準ライブラリに渡す長さは、Node も Bun も Linux と illumos は 107 バイト、他は 103 バイトまで (`sun_path` − 1。Linux の Node は NUL の入らない 108 バイトも受け付けるが、渡さない)。それ以下の絶対パスは標準ライブラリにそのまま渡す
 - 相対パスは、bind 系 (`bind`・`bindEx`・`listen`・`listenEx`) と resolve では絶対パスにしてから扱い、connect 系 (`connect`・`connectEx`) では相対のまま扱う。仕様の「[相対パスを絶対パスにする](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#相対パスを絶対パスにする)」と、下の「[相対パス](#相対パス)」
-- 空のパスと、先頭以外に NUL を含むパスは `TypeError` (`code` は `ERR_INVALID_ARG_VALUE`)。Linux では先頭が NUL のパス (abstract) を標準にそのまま渡す
-- node:net は数値に読める文字列 (`"0"`・`"8080"`・`"1e3"`・空白だけ 等) を TCP のポートとみなす。相対のまま標準に渡す綴り (connect 系と、bind と resolve でどの候補も経路も使えない時) がスラッシュを含まずそう読める時は、`./` を付けて渡す (同じファイル。`Spelling` は `CwdRelative` のまま、`address()` は渡したパス)。`./` を付けて標準に渡す長さを超える時は長いパスとして扱う。bind の `"0"` は絶対パスの候補で標準に渡るので (`Original`)、`./` は要らず、`address()` はその絶対パス
+- 空のパスと、先頭以外に NUL を含むパスは `TypeError` (`code` は `ERR_INVALID_ARG_VALUE`)。Linux では先頭が NUL のパス (abstract) を標準ライブラリにそのまま渡す
+- node:net は数値に読める文字列 (`"0"`・`"8080"`・`"1e3"`・空白だけ 等) を TCP のポートとみなす。相対のまま標準ライブラリに渡す綴り (connect 系と、bind と resolve でどの候補も経路も使えない時) がスラッシュを含まずそう読める時は、`./` を付けて渡す (同じファイル。`Spelling` は `CwdRelative` のまま、`address()` は渡したパス)。`./` を付けて標準ライブラリに渡す長さを超える時は長いパスとして扱う。bind の `"0"` は絶対パスの候補で標準ライブラリに渡るので (`Original`)、`./` は要らず、`address()` はその絶対パス
 - OS のエラーは Node の形 (`code`・`errno`・`syscall`・`path`。`path` は渡したパス)
 - 他のパッケージに依存しない
-- 長いパスと相対パスの bind では、標準と違う点がある。仕様の「[長いパスで標準と違う点](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#長いパスで標準と違う点)」と、下の「[SPEC から外れる点](#spec-から外れる点)」
+- 長いパスと相対パスの bind では、標準ライブラリと違う点がある。仕様の「[長いパスで標準ライブラリと違う点](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#長いパスで標準ライブラリと違う点)」と、下の「[SPEC から外れる点](#spec-から外れる点)」
 
 ## 関数
 
@@ -66,7 +66,7 @@
 | `kind` | 綴り |
 |---|---|
 | `"Original"` | 絶対パス。渡した絶対パスそのもの (abstract の名前も) か、同じ所を指す絶対パス (相対パスを絶対にした候補、長い絶対パスの実パスの候補) |
-| `"CwdRelative"` | 渡した相対パスそのもの (`./` を付けた物も)。どの候補も経路も使えず、相対のまま標準に渡した時と、resolve に名前で終わらない相対パスを渡した時だけ |
+| `"CwdRelative"` | 渡した相対パスそのもの (`./` を付けた物も)。どの候補も経路も使えず、相対のまま標準ライブラリに渡した時と、resolve に名前で終わらない相対パスを渡した時だけ |
 | `"Linked"` | 置き場の B・D・E を通り、元のパスと同じ所を指す |
 | `"Dangling"` | どこにも届かない (sockat-ts では生まれない) |
 
@@ -76,13 +76,13 @@
 
 ## 相対パス
 
-bind 系と resolve は相対パスを絶対パスにしてから扱い、connect 系は相対のまま渡す。手順と標準と違う点は仕様の「[相対パスを絶対パスにする](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#相対パスを絶対パスにする)」。TypeScript では:
+bind 系と resolve は相対パスを絶対パスにしてから扱い、connect 系は相対のまま渡す。手順と標準ライブラリと違う点は仕様の「[相対パスを絶対パスにする](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#相対パスを絶対パスにする)」。TypeScript では:
 
-- 絶対パスの候補を標準に渡した時、`address()` と `unix` はその候補を返す
+- 絶対パスの候補を標準ライブラリに渡した時、`address()` と `unix` はその候補を返す
 - 経路に進んだ時は、実パスの候補の形 (ソケットのディレクトリの実パスとファイル名) を返す
-- どの経路も使えずに相対のまま標準に渡した時 (`CwdRelative`) だけ、渡した相対パスのまま返す
+- どの経路も使えずに相対のまま標準ライブラリに渡した時 (`CwdRelative`) だけ、渡した相対パスのまま返す
 - `$PWD` は呼び出しのたびに環境変数から読む (`process.chdir` は `$PWD` を直さないので、cwd と違う `$PWD` は候補にしない)
-- cwd が PATH_MAX より深いと (実パスを引けない)、短い相対パスの既定の `bind` は相対のまま標準に渡って通る。`bindEx` はソケットのファイルを覚えられずエラーになる
+- cwd が PATH_MAX より深いと (実パスを引けない)、短い相対パスの既定の `bind` は相対のまま標準ライブラリに渡って通る。`bindEx` はソケットのファイルを覚えられずエラーになる
 - 細部は [DR-0005](decisions/DR-0005-absolutize-relative-path-details.md)
 
 ## ソケットのファイルを消す (`file`)
@@ -91,13 +91,13 @@ bind 系と resolve は相対パスを絶対パスにしてから扱い、connec
 
 - `remove()` はファイルを消すだけで、listener を閉じない。listener を閉じる前に呼ぶ
 - `bindEx` / `listenEx` の listener も、閉じると綴りを unlink する ([SPEC から外れる点](#spec-から外れる点))
-- ファイルを覚えられない時、`bindEx` はエラーにする。経路の綴りは symlink を先に消してから listener を閉じる (置き換わった物は消さない)。標準に渡した綴り (短い絶対パス、絶対パスの候補、相対のまま渡した綴り) は、閉じると bind したソケットだけが消えると確かめられる時だけ閉じ、それ以外は閉じずに `unref()` して手放す ([SPEC から外れる点](#spec-から外れる点))
+- ファイルを覚えられない時、`bindEx` はエラーにする。経路の綴りは symlink を先に消してから listener を閉じる (置き換わった物は消さない)。標準ライブラリに渡した綴り (短い絶対パス、絶対パスの候補、相対のまま渡した綴り) は、閉じると bind したソケットだけが消えると確かめられる時だけ閉じ、それ以外は閉じずに `unref()` して手放す ([SPEC から外れる点](#spec-から外れる点))
 
 ## resolve (`ForBind`・`ForConnect`)
 
 返す綴りと使えない時は仕様の「[resolve](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#resolve)」と「[`ForBind` の `SocketFile`](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#forbind-の-socketfile)」。使い方は利用マニュアルの「[パスだけを解決する](manual/resolve-ja.md)」。
 
-- 綴りは標準の口 (`net.Server.listen`、`net.connect`、`Bun.serve({ unix })`、`fetch(url, { unix })`、node:http の `socketPath` 等) に渡す。node:net には数値に読める綴りも `./` を付けて返す
+- 綴りは標準ライブラリの口 (`net.Server.listen`、`net.connect`、`Bun.serve({ unix })`、`fetch(url, { unix })`、node:http の `socketPath` 等) に渡す。node:net には数値に読める綴りも `./` を付けて返す
 - `ForBind.socketFile()` は listen の後・listener を閉じる前に呼ぶ
 - 届かない長さは `ENAMETOOLONG`
 
@@ -117,7 +117,7 @@ bind 系と resolve は相対パスを絶対パスにしてから扱い、connec
 | `spelling` を見ずに、カーネルが返す綴り (他の言語の相手の `getpeername`、`lsof` の出力等) で `fs.unlinkSync` / `fs.statSync` する | 渡したパスを持っておいて使う。`b.file.remove()` |
 | `cleanup()` の後やプロセスが終わった後に `f.path` を使う | 綴りは `until` の間だけ使う |
 | 相対パスで bind し、`process.chdir` の後にその相対パスの文字列で `fs.unlinkSync` する | `b.file.remove()` |
-| `spelling` が `CwdRelative` の listener を、`process.chdir` の後に閉じる (標準が閉じた時点の cwd で相対パスを unlink する) | cwd を変える前に `b.file.remove()` を呼んで閉じる |
+| `spelling` が `CwdRelative` の listener を、`process.chdir` の後に閉じる (標準ライブラリが閉じた時点の cwd で相対パスを unlink する) | cwd を変える前に `b.file.remove()` を呼んで閉じる |
 | `server.close()` / `listener.stop()` でソケットのファイルが消えると当てにする (link-file の綴りでは symlink だけが消える) | `b.file.remove()` か、渡したパスで消す |
 | `b.file.remove()` で listener も閉じると当てにする | listener は自分で閉じる |
 | `server.close()` の後に `b.file.remove()` を呼ぶ | 閉じる前に呼ぶ |
@@ -139,7 +139,7 @@ const f = resolveForBind(path, { usableCrossUid: true });
 
 ## 長いパスへの届き方
 
-標準に渡す長さを超えるパスは、仕様の「[長いパスの経路と試す順番](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#長いパスの経路と試す順番)」の経路を順に試す。bind と resolve は、経路の前に絶対パスの候補 (相対パスは実パスと `$PWD` の候補、長い絶対パスは実パスの候補) が収まるかを見て、収まればそれを標準に渡す (置き場に何も作らない)。相対パスは、短くても絶対にすると長ければ経路に進む。
+標準ライブラリに渡す長さを超えるパスは、仕様の「[長いパスの経路と試す順番](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md#長いパスの経路と試す順番)」の経路を順に試す。bind と resolve は、経路の前に絶対パスの候補 (相対パスは実パスと `$PWD` の候補、長い絶対パスは実パスの候補) が収まるかを見て、収まればそれを標準ライブラリに渡す (置き場に何も作らない)。相対パスは、短くても絶対にすると長ければ経路に進む。
 
 native の部品が要る経路は作らず、使えない経路として `skipped` に入れて次へ進む (理由は `no native code in sockat-ts`)。
 
@@ -156,7 +156,7 @@ native の部品が要る経路は作らず、使えない経路として `skipp
 
 ### どこから届かなくなるか
 
-ディレクトリが標準に渡す長さを超えるほど深い時に、sockat-ts で届くファイル名の長さ (バイト。置き場は OS の既定)。作らない経路の分、ハブの [届く範囲](https://github.com/kawaz/sockat/blob/main/pages/reach/README-ja.md) の他の言語より短い所がある:
+ディレクトリが標準ライブラリに渡す長さを超えるほど深い時に、sockat-ts で届くファイル名の長さ (バイト。置き場は OS の既定)。作らない経路の分、ハブの [届く範囲](https://github.com/kawaz/sockat/blob/main/pages/reach/README-ja.md) の他の言語より短い所がある:
 
 | OS | bind (`bind`・`bindEx`・`listen`・`resolveForBind`) | `connect`・`connectEx` | `resolveForConnect` |
 |---|---|---|---|
@@ -174,13 +174,13 @@ Linux で `/proc` が見えない環境 (空の tmpfs を被せた等) では、
 
 - 作らない経路 ([長いパスへの届き方](#長いパスへの届き方) の表) でしか届かない所に届かない
 - **`bindEx` / `listenEx` の listener も、閉じると綴りを unlink する** (SPEC は「`_ex` の listener は閉じても消さない」。runtime に止める口が無い)。`file.remove()` は閉じる前に呼ぶ
-- `bindEx` / `listenEx` が標準に渡した綴りのファイルを覚えられなかった時 (bind の直後にソケットが置き換えられた、`CwdRelative` で bind の間に cwd が変わった、cwd が PATH_MAX より深い) は、閉じると bind したソケットだけが消えると確かめられる時にだけ閉じる。それ以外は listener を閉じずに `unref()` して手放す。置き換えた物と、bind したソケットのファイルは残る ([DR-0004](decisions/DR-0004-close-relative-listener-only-when-ours.md))。標準は閉じる時に渡した綴りを unlink する (相対の綴りは閉じた時点の cwd で) ので、SPEC の「閉じる」をそのまま当てると、それらを消してしまうため
-- 相対のまま標準に渡した綴り (`CwdRelative`) の listener は、標準が閉じた時点の cwd で unlink する。cwd を変えた後に閉じると、移った先の同じ名前のファイルを消す
-- DGRAM と SEQPACKET は無い (Node と Bun の標準に無い)
-- 標準に渡した綴り (短い絶対パス、絶対パスの候補、相対のまま渡した綴り) のエラーは標準のまま (Node の listen は無いディレクトリに `EACCES` を返す)。短い相対パスでディレクトリが無い時は、候補を作れずに SPEC どおり `ENOENT` (`route` は `null`)。長いパスも SPEC の errno (`ENOENT`)
+- `bindEx` / `listenEx` が標準ライブラリに渡した綴りのファイルを覚えられなかった時 (bind の直後にソケットが置き換えられた、`CwdRelative` で bind の間に cwd が変わった、cwd が PATH_MAX より深い) は、閉じると bind したソケットだけが消えると確かめられる時にだけ閉じる。それ以外は listener を閉じずに `unref()` して手放す。置き換えた物と、bind したソケットのファイルは残る ([DR-0004](decisions/DR-0004-close-relative-listener-only-when-ours.md))。標準ライブラリは閉じる時に渡した綴りを unlink する (相対の綴りは閉じた時点の cwd で) ので、SPEC の「閉じる」をそのまま当てると、それらを消してしまうため
+- 相対のまま標準ライブラリに渡した綴り (`CwdRelative`) の listener は、標準ライブラリが閉じた時点の cwd で unlink する。cwd を変えた後に閉じると、移った先の同じ名前のファイルを消す
+- DGRAM と SEQPACKET は無い (Node と Bun の標準ライブラリに無い)
+- 標準ライブラリに渡した綴り (短い絶対パス、絶対パスの候補、相対のまま渡した綴り) のエラーは標準ライブラリのまま (Node の listen は無いディレクトリに `EACCES` を返す)。短い相対パスでディレクトリが無い時は、候補を作れずに SPEC どおり `ENOENT` (`route` は `null`)。長いパスも SPEC の errno (`ENOENT`)
 
 ## 仕様と設計
 
-- [sockat の仕様](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md) — 言語によらない振る舞い (公開する操作、resolve、綴りの性質、片付け、置き場に残る物、経路、標準と違う点、使ってはいけない書き方、エラー)
+- [sockat の仕様](https://github.com/kawaz/sockat/blob/main/docs/SPEC-ja.md) — 言語によらない振る舞い (公開する操作、resolve、綴りの性質、片付け、置き場に残る物、経路、標準ライブラリと違う点、使ってはいけない書き方、エラー)
 - [言語ごとの注意](https://github.com/kawaz/sockat/blob/main/pages/langs-ja.md) — 各言語の実装に固有の注意の一覧
 - [docs/decisions/](decisions/INDEX.md) — TypeScript 版の設計の判断 (DR)

@@ -6,7 +6,7 @@
 
 ## node:net で待ち受ける
 
-`net.createServer().listen(path)` の代わりに `await bind(path)` と書く。listen が終わってから、標準の `net.Server` が返る。
+`net.createServer().listen(path)` の代わりに `await bind(path)` と書く。listen が終わってから、標準ライブラリの `net.Server` が返る。
 
 ```ts
 import { bind } from "@kawaz/sockat";

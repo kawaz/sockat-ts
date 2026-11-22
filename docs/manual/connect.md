@@ -6,7 +6,7 @@ Part of the [user manual](../MANUAL.md). The code runs in [test/manual.test.ts](
 
 ## Connect with node:net
 
-Write `await connect(path)` instead of `net.connect(path)`. It returns the standard `net.Socket` once it is connected.
+Write `await connect(path)` instead of `net.connect(path)`. It returns the standard library's `net.Socket` once it is connected.
 
 ```ts
 import { connect } from "@kawaz/sockat";
