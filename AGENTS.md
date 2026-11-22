@@ -32,7 +32,7 @@ sockat-ts は、`sun_path` の上限を超えるパスでも Unix domain socket 
 | `src/fsx.ts` | `(st_dev, st_ino)`、実パス、`socketAt`、`*at` の代わり (`/proc/self/fd/<fd>/<名前>` か確かめた実パス) |
 | `src/paths.ts` / `src/names.ts` | パスの算術 (`$PWD` の候補の字句の畳み `foldLexically` を含む)、乱数の名前と `createAt` |
 | `conformance/cli.ts` | ハブの適合試験の CLI (`just conformance [node\|bun]`)。package に入らない |
-| `test/*.test.ts` | 試験 (`node:test` で書き、Node と Bun の両方で走る)。`readme.test.ts` はマニュアル (`docs/MANUAL-ja.md`) の推奨コードを動かす。`helpers.ts` が試験専用の置き場と world を用意し、`child.ts` が cwd を変える試験を子プロセスで走らせる |
+| `test/*.test.ts` | 試験 (`node:test` で書き、Node と Bun の両方で走る)。`manual.test.ts` は利用マニュアル (`docs/manual/`) のサンプルとリファレンス (`docs/REFERENCE-ja.md`) の推奨コードをそのまま動かし、ページのコードが全部そこにあるかも確かめる。`helpers.ts` が試験専用の置き場と world を用意し、`child.ts` が cwd を変える試験を子プロセスで走らせる |
 
 ## 試験
 
@@ -58,5 +58,5 @@ sockat-ts は、`sun_path` の上限を超えるパスでも Unix domain socket 
 
 - jj colocate。commit は `jj commit -m "..." <files...>` でパスを指定する
 - push は `just push` だけ
-- README とマニュアルは日本語版 (`README-ja.md`・`docs/MANUAL-ja.md`) が正本。英語版は同じ変更で直す。README は困っている利用者への入口 (ハブの AGENTS.md の決まり) で、詳しい中身はマニュアルに置く
+- README・利用マニュアル・リファレンスは日本語版 (`README-ja.md`・`docs/MANUAL-ja.md`・`docs/manual/*-ja.md`・`docs/REFERENCE-ja.md`) が正本。英語版は同じ変更で直し、見出しの数と順をそろえる。README は困っている利用者への入口、利用マニュアルは場面ごとの使い方とサンプル、リファレンスは使い方でない物 (関数と型、`Options`、`Spelling`、使ってはいけない書き方、経路と届く範囲、SPEC から外れる点) (パスと分け方はハブの SPEC の「各実装に求めること」)
 - package.json の version を上げた push で、CI を通してから Release が registry に公開し、tag と GitHub Release を作る。version を上げるのは kawaz の OK を取ってから

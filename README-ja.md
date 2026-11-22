@@ -24,7 +24,7 @@ const server = await bind(path); // listen が終わってから返る
 const socket = await connect(path); // connect が終わってから返る
 ```
 
-返ってくるのは標準と同じ `net.Server` / `net.Socket` で、短いパスは今までどおり標準にそのまま渡します。長いパスの時だけ、sockat が同じ場所を指す短い道を裏で用意してつなぎます。ソケットを置くディレクトリがどれだけ深くても、パスを短くする工夫も、ランタイムや OS ごとのパスの上限も、気にしなくて構いません。
+返ってくるのは標準と同じ `net.Server` / `net.Socket` です。絶対パスが短ければ標準にそのまま渡し、長い時だけ、sockat が同じ場所を指す短い道を裏で用意してつなぎます。bind する相対パスは先に絶対パスにしてから同じに扱うので、後で cwd を変えても同じソケットを指し続けます。ソケットを置くディレクトリがどれだけ深くても、パスを短くする工夫も、ランタイムや OS ごとのパスの上限も、気にしなくて構いません。
 
 ## 入れ方
 
@@ -39,7 +39,7 @@ Node.js 22 以上と Bun で動き、他のパッケージにも native の部�
 ## もっと詳しく
 
 - [利用マニュアル](./docs/MANUAL-ja.md)
-- [リファレンス](./docs/MANUAL-ja.md#関数の一覧)
+- [リファレンス](./docs/REFERENCE-ja.md)
 - [技術説明](https://github.com/kawaz/sockat/blob/main/pages/technical-ja.md)
 
 ## ライセンス
